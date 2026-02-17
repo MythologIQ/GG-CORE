@@ -1,0 +1,76 @@
+# Default values for veritas-sdr
+
+replicaCount: 1
+
+image:
+  repository: veritas-sdr
+  tag: "0.5.0"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1"
+  limits:
+    memory: "4Gi"
+    cpu: "2"
+
+# GPU configuration (optional)
+gpu:
+  enabled: false
+  count: 1
+  resourceType: "nvidia.com/gpu"
+
+# Model storage
+models:
+  pvcName: "models-pvc"
+  mountPath: "/models"
+
+# Runtime configuration
+config:
+  socketPath: "/var/run/veritas/veritas-sdr.sock"
+  maxContextLength: 4096
+  sessionTimeout: 3600
+  shutdownTimeout: 30
+
+# Health probes using exec (NO HTTP)
+probes:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  readOnlyRootFilesystem: true
+
+# Pod security
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+# Network policy (deny all by default - Alcatraz principle)
+networkPolicy:
+  enabled: true
+  denyAll: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

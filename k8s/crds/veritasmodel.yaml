@@ -1,0 +1,70 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: veritasmodels.veritas.io
+spec:
+  group: veritas.io
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - modelId
+                - version
+                - source
+              properties:
+                modelId:
+                  type: string
+                version:
+                  type: string
+                source:
+                  type: object
+                  required:
+                    - pvc
+                    - path
+                  properties:
+                    pvc:
+                      type: string
+                    path:
+                      type: string
+                variant:
+                  type: string
+                  description: A/B testing variant label
+                autoLoad:
+                  type: boolean
+                  default: true
+            status:
+              type: object
+              properties:
+                loaded:
+                  type: boolean
+                phase:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+      subresources:
+        status: {}
+  scope: Namespaced
+  names:
+    plural: veritasmodels
+    singular: veritasmodel
+    kind: VeritasModel
+    shortNames:
+      - vmd

@@ -1,0 +1,31 @@
+{{- if .Values.serviceAccount.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "veritas-sdr.fullname" . }}
+  labels:
+    {{- include "veritas-sdr.labels" . | nindent 4 }}
+rules:
+  # Minimal permissions - read-only access to own namespace resources
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["veritas.io"]
+    resources: ["veritasmodels"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "veritas-sdr.fullname" . }}
+  labels:
+    {{- include "veritas-sdr.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "veritas-sdr.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "veritas-sdr.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

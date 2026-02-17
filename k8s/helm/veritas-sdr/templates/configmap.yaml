@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "veritas-sdr.fullname" . }}-config
+  labels:
+    {{- include "veritas-sdr.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {
+      "socket_path": "{{ .Values.config.socketPath }}",
+      "max_context_length": {{ .Values.config.maxContextLength }},
+      "session_timeout": {{ .Values.config.sessionTimeout }},
+      "shutdown_timeout": {{ .Values.config.shutdownTimeout }},
+      "models_path": "{{ .Values.models.mountPath }}"
+    }

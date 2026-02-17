@@ -29,9 +29,6 @@ pub mod security;
 pub mod shutdown;
 pub mod telemetry;
 
-// Distributed inference module (v0.3.0)
-pub mod distributed;
-
 // A/B testing module (v0.5.0)
 pub mod ab_testing;
 

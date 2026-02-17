@@ -8,7 +8,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Benchmark configuration
 const MODEL_PATH: &str = "./models/phi-3-mini-q4km.gguf";

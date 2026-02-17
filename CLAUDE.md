@@ -55,18 +55,28 @@ All code must satisfy:
 
 Violations block implementation.
 
-## Planned Structure (Rust)
+## Current Structure (Rust)
 
 ```
 core-runtime/
 ├── src/
-│   ├── main.rs           # Entry point
-│   ├── lib.rs            # Public API
-│   ├── ipc/              # IPC handling, auth, protocol
-│   ├── scheduler/        # Queue, priority, batching
-│   ├── engine/           # Inference, tokenizer, streaming
-│   ├── models/           # Loader, registry, hot swap
-│   └── memory/           # Pool, GPU, cache
+│   ├── main.rs             # Entry point
+│   ├── lib.rs              # Public API
+│   ├── ipc/                # IPC handling, auth, protocol
+│   ├── scheduler/          # Queue, priority, batching
+│   ├── engine/             # Inference, tokenizer, streaming
+│   │   └── moe/            # Mixture of Experts (router, executor, combiner)
+│   ├── models/             # Loader, registry, hot swap, versioning
+│   ├── memory/             # Pool, GPU, cache
+│   ├── telemetry/          # Prometheus metrics, OpenTelemetry spans
+│   ├── ab_testing/         # A/B testing (traffic splitting, metrics)
+│   │   ├── traffic/        # Traffic allocation
+│   │   └── metrics/        # Per-variant statistics
+│   ├── ffi/                # C FFI bindings
+│   ├── python/             # PyO3 Python bindings
+│   └── cli/                # Health probe CLI
+├── include/                # Generated C headers (cbindgen)
+├── python/                 # Python package structure
 └── Cargo.toml
 ```
 

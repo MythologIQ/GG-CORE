@@ -102,26 +102,6 @@ Veritas SDR is in pre-production status. Core functionality is complete and test
 
 ## Completed Features (v0.3.0)
 
-### Distributed Inference
-
-- [x] Distributed node coordination
-- [x] P2P tensor transfer
-- [x] Model sharding strategies
-- [x] Consensus protocol
-
-### Distributed Architecture
-
-- [`NodeCoordinator`](core-runtime/src/distributed/coordinator.rs) - Cluster coordination
-- [`P2PTransfer`](core-runtime/src/distributed/p2p.rs) - Direct tensor transfer
-- [`Sharding`](core-runtime/src/distributed/sharding.rs) - Model partition strategies
-- [`Consensus`](core-runtime/src/distributed/consensus.rs) - State synchronization
-
-**Status:** Complete
-
----
-
-## Completed Features (v0.3.1)
-
 ### C FFI API
 
 - [x] Opaque runtime and session handles
@@ -224,8 +204,8 @@ Veritas SDR is in pre-production status. Core functionality is complete and test
 ### A/B Testing Architecture
 
 - [`ab_testing/variant.rs`](core-runtime/src/ab_testing/variant.rs) - VariantLabel, Variant
-- [`ab_testing/traffic.rs`](core-runtime/src/ab_testing/traffic.rs) - TrafficConfig, TrafficSplitter
-- [`ab_testing/metrics.rs`](core-runtime/src/ab_testing/metrics.rs) - VariantStats, VariantMetrics
+- [`ab_testing/traffic/`](core-runtime/src/ab_testing/traffic/) - TrafficConfig, TrafficSplitter, bucket allocation
+- [`ab_testing/metrics/`](core-runtime/src/ab_testing/metrics/) - VariantStats, VariantMetrics, snapshots
 
 ### Kubernetes Operator Foundation
 
@@ -281,8 +261,7 @@ Veritas SDR is in pre-production status. Core functionality is complete and test
 | **0.1.0** | Complete  | Core functionality, security       |
 | **0.2.0** | Complete  | GPU support (CUDA/Metal)           |
 | **0.2.1** | Complete  | Benchmarking, comparison           |
-| **0.3.0** | Complete  | Distributed inference              |
-| **0.3.1** | Complete  | C FFI & Python bindings            |
+| **0.3.0** | Complete  | C FFI & Python bindings            |
 | **0.4.0** | Complete  | Observability, MoE                 |
 | **0.5.0** | Complete  | Enterprise features                |
 | **0.6.0** | Planned   | Security audit, deployments        |
