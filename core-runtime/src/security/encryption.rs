@@ -102,7 +102,12 @@ impl ModelEncryption {
         let mut key = [0u8; KEY_SIZE];
 
         // Use PBKDF2-HMAC-SHA256 for secure key derivation
-        pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, Self::PBKDF2_ITERATIONS, &mut key);
+        pbkdf2_hmac::<Sha256>(
+            password.as_bytes(),
+            salt,
+            Self::PBKDF2_ITERATIONS,
+            &mut key[..],
+        );
 
         Self::new(key)
     }
@@ -179,7 +184,7 @@ impl ModelEncryption {
     /// The ciphertext includes the authentication tag appended to it.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), EncryptionError> {
         // Create cipher
-        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&self.key);
+        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(self.key.as_slice());
         let cipher = Aes256Gcm::new(key);
 
         // Generate random nonce (required for semantic security)
@@ -205,7 +210,7 @@ impl ModelEncryption {
         }
 
         // Create cipher
-        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&self.key);
+        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(self.key.as_slice());
         let cipher = Aes256Gcm::new(key);
 
         // Decrypt with AES-GCM (verifies authentication tag)
@@ -321,7 +326,7 @@ impl ModelEncryption {
                 .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
             // Decrypt
-            self.decrypt(&nonce, &ciphertext)?
+            self.decrypt(&nonce[..], &ciphertext)?
         } else {
             // Legacy ECB format (deprecated, for migration only)
             // Read tag
@@ -344,7 +349,8 @@ impl ModelEncryption {
                 .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
             // Decrypt using legacy ECB method
-            self.decrypt_legacy(&nonce, &ciphertext, &tag)?
+            #[allow(deprecated)]
+            self.decrypt_legacy(&nonce[..], &ciphertext, &tag[..])?
         };
 
         // Write output file
@@ -416,7 +422,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_empty() {
         let encryption = ModelEncryption::new(create_test_key());
-        let plaintext: &[u8] = b"";
+        let plaintext: &[u8] = &b""[..];
 
         let (nonce, ciphertext) = encryption.encrypt(plaintext).unwrap();
         let decrypted = encryption.decrypt(&nonce, &ciphertext).unwrap();
@@ -481,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_password_derived_key() {
-        let salt: &[u8] = b"salt";
+        let salt: &[u8] = &b"salt"[..];
         let enc1 = ModelEncryption::from_password("password123", salt);
         let enc2 = ModelEncryption::from_password("password123", salt);
         let enc3 = ModelEncryption::from_password("password456", salt);
@@ -607,8 +613,8 @@ mod tests {
     #[test]
     fn test_pbkdf2_key_derivation_deterministic() {
         // Same password and salt should produce the same key
-        let enc1 = ModelEncryption::from_password("password", b"salt");
-        let enc2 = ModelEncryption::from_password("password", b"salt");
+        let enc1 = ModelEncryption::from_password("password", b"salt".as_slice());
+        let enc2 = ModelEncryption::from_password("password", b"salt".as_slice());
 
         let plaintext = b"Test message";
         let (nonce, ct) = enc1.encrypt(plaintext.as_slice()).unwrap();
@@ -618,8 +624,8 @@ mod tests {
 
     #[test]
     fn test_pbkdf2_different_passwords() {
-        let enc1 = ModelEncryption::from_password("password1", b"salt");
-        let enc2 = ModelEncryption::from_password("password2", b"salt");
+        let enc1 = ModelEncryption::from_password("password1", b"salt".as_slice());
+        let enc2 = ModelEncryption::from_password("password2", b"salt".as_slice());
 
         let plaintext = b"Test message";
         let (nonce, ct) = enc1.encrypt(plaintext.as_slice()).unwrap();
@@ -629,8 +635,8 @@ mod tests {
 
     #[test]
     fn test_pbkdf2_different_salts() {
-        let enc1 = ModelEncryption::from_password("password", b"salt1");
-        let enc2 = ModelEncryption::from_password("password", b"salt2");
+        let enc1 = ModelEncryption::from_password("password", b"salt1".as_slice());
+        let enc2 = ModelEncryption::from_password("password", b"salt2".as_slice());
 
         let plaintext = b"Test message";
         let (nonce, ct) = enc1.encrypt(plaintext.as_slice()).unwrap();
@@ -641,7 +647,7 @@ mod tests {
     #[test]
     fn test_pbkdf2_empty_password() {
         // Empty password should still work (though not recommended)
-        let enc = ModelEncryption::from_password("", b"salt");
+        let enc = ModelEncryption::from_password("", b"salt".as_slice());
         let plaintext = b"Test";
         let (nonce, ct) = enc.encrypt(plaintext.as_slice()).unwrap();
         let decrypted = enc.decrypt(&nonce, &ct).unwrap();
@@ -651,7 +657,7 @@ mod tests {
     #[test]
     fn test_pbkdf2_empty_salt() {
         // Empty salt should still work (though not recommended)
-        let enc = ModelEncryption::from_password("password", b"");
+        let enc = ModelEncryption::from_password("password", b"".as_slice());
         let plaintext = b"Test";
         let (nonce, ct) = enc.encrypt(plaintext.as_slice()).unwrap();
         let decrypted = enc.decrypt(&nonce, &ct).unwrap();
