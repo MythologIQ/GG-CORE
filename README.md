@@ -12,7 +12,7 @@ A security-first inference runtime for air-gapped and compliance-sensitive envir
 
 ## Why Veritas SDR?
 
-### ⚡ 27,000x Faster Infrastructure
+### ⚡Up to 27,000x Faster Infrastructure
 
 | Runtime | Overhead | vs Veritas SDR |
 |---------|----------|----------------|
