@@ -61,7 +61,20 @@
       "Bash(CMAKE_GENERATOR=\"Visual Studio 17 2022\" LIBCLANG_PATH=\"C:/Program Files/llvm15.0.7/bin\" PROTOC=\"C:/Users/krkna/AppData/Local/Microsoft/WinGet/Packages/Google.Protobuf_Microsoft.Winget.Source_8wekyb3d8bbwe/bin/protoc.exe\" cargo test:*)",
       "Bash(findstr:*)",
       "Bash(powershell -Command \"Get-Process | Where-Object {$_ProcessName -match ''cargo|rustc|bench''} | Select-Object ProcessName, Id, CPU, WorkingSet64 | Format-Table -AutoSize\")",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(git config:*)",
+      "Bash(npm config:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(git mv:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(dir:*)",
+      "Bash(xargs:*)",
+      "Bash(git reset:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

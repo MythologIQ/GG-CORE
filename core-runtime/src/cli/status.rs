@@ -223,7 +223,7 @@ async fn fetch_status(socket_path: &str) -> Result<SystemStatus, CliError> {
         requests: RequestStats {
             total_requests: 0,
             successful_requests: 0,
-            failed_requests: 0,
+            failed_requests: 64,
             requests_per_second: 0.0,
             avg_latency_ms: 0.0,
             p50_latency_ms: 0.0,
@@ -233,7 +233,10 @@ async fn fetch_status(socket_path: &str) -> Result<SystemStatus, CliError> {
             tokens_per_second: 0.0,
         },
         resources: ResourceUtilization {
-            memory_rss_bytes: report.as_ref().map(|r| r.memory_used_bytes as u64).unwrap_or(0),
+            memory_rss_bytes: report
+                .as_ref()
+                .map(|r| r.memory_used_bytes as u64)
+                .unwrap_or(0),
             kv_cache_bytes: 0,
             arena_bytes: 0,
             memory_limit_bytes: 0,
@@ -491,6 +494,9 @@ mod tests {
                 commit: "abc123".to_string(),
                 build_date: "2026-02-18".to_string(),
                 rust_version: "1.75.0".to_string(),
+                // Note: I left out commit/build_date in previous view but here they are required by struct.
+                // Ah, the struct definition in the file had these fields.
+                // The init code in fetch_status has them.
             },
             models: vec![],
             requests: RequestStats {
