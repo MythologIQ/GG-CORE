@@ -200,59 +200,140 @@ pub async fn run_status(socket_path: &str, json_output: bool) -> i32 {
 async fn fetch_status(socket_path: &str) -> Result<SystemStatus, CliError> {
     let client = CliIpcClient::new(socket_path.to_string());
 
-    // Get health report from the runtime
+    // Get health report and metrics from the runtime
     let health_response = client.get_health_report().await?;
     let report = health_response.report;
 
-    // Build SystemStatus from health report
-    // Note: Full status endpoint to be implemented in future version
+    // Get metrics snapshot (may fail if runtime doesn't support it yet)
+    let metrics = client.get_metrics().await.ok();
+
+    // Get loaded models (may fail if runtime doesn't support it yet)
+    let models_response = client.get_models().await.ok();
+
+    // Extract counters from metrics
+    let total_requests = metrics
+        .as_ref()
+        .and_then(|m| m.counters.get("core_requests_total").copied())
+        .unwrap_or(0);
+    let successful_requests = metrics
+        .as_ref()
+        .and_then(|m| m.counters.get("core_requests_success").copied())
+        .unwrap_or(0);
+    let failed_requests = metrics
+        .as_ref()
+        .and_then(|m| m.counters.get("core_requests_failed").copied())
+        .unwrap_or(0);
+    let tokens_generated = metrics
+        .as_ref()
+        .and_then(|m| m.counters.get("core_tokens_output_total").copied())
+        .unwrap_or(0);
+
+    // Extract gauges from metrics
+    let memory_pool_bytes = metrics
+        .as_ref()
+        .and_then(|m| m.gauges.get("core_memory_pool_used_bytes").copied())
+        .unwrap_or(0.0) as u64;
+    let arena_bytes = metrics
+        .as_ref()
+        .and_then(|m| m.gauges.get("core_arena_used_bytes").copied())
+        .unwrap_or(0.0) as u64;
+    let queue_depth = metrics
+        .as_ref()
+        .and_then(|m| m.gauges.get("core_queue_depth").copied())
+        .unwrap_or(0.0) as u64;
+
+    // Extract histogram data for latency
+    let latency_hist = metrics
+        .as_ref()
+        .and_then(|m| m.histograms.get("core_inference_latency_ms"));
+    let avg_latency_ms = latency_hist
+        .map(|h| if h.count > 0 { h.sum / h.count as f64 } else { 0.0 })
+        .unwrap_or(0.0);
+
+    // Calculate uptime and rates
+    let uptime_secs = report.as_ref().map(|r| r.uptime_secs).unwrap_or(1).max(1);
+    let requests_per_second = total_requests as f64 / uptime_secs as f64;
+    let tokens_per_second = tokens_generated as f64 / uptime_secs as f64;
+
     let status = SystemStatus {
         health: if health_response.ok {
             HealthState::Healthy
         } else {
             HealthState::Unhealthy
         },
-        uptime_secs: report.as_ref().map(|r| r.uptime_secs).unwrap_or(0),
+        uptime_secs,
         version: VersionInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            commit: "unknown".to_string(),
-            build_date: "unknown".to_string(),
-            rust_version: "unknown".to_string(),
+            commit: option_env!("VERGEN_GIT_SHA").unwrap_or("unknown").to_string(),
+            build_date: option_env!("VERGEN_BUILD_DATE").unwrap_or("unknown").to_string(),
+            rust_version: option_env!("VERGEN_RUSTC_SEMVER").unwrap_or("unknown").to_string(),
         },
-        models: vec![],
+        models: models_response
+            .as_ref()
+            .map(|r| {
+                r.models
+                    .iter()
+                    .map(|m| {
+                        let avg_latency = if m.request_count > 0 {
+                            m.avg_latency_ms / m.request_count as f64
+                        } else {
+                            0.0
+                        };
+                        ModelStatus {
+                            name: m.name.clone(),
+                            format: m.format.clone(),
+                            size_bytes: m.size_bytes,
+                            loaded_at: m.loaded_at.clone(),
+                            request_count: m.request_count,
+                            avg_latency_ms: avg_latency,
+                            state: match m.state.as_str() {
+                                "loading" => ModelState::Loading,
+                                "ready" => ModelState::Ready,
+                                "unloading" => ModelState::Unloading,
+                                "error" => ModelState::Error,
+                                _ => ModelState::Ready,
+                            },
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         requests: RequestStats {
-            total_requests: 0,
-            successful_requests: 0,
-            failed_requests: 64,
-            requests_per_second: 0.0,
-            avg_latency_ms: 0.0,
-            p50_latency_ms: 0.0,
-            p95_latency_ms: 0.0,
-            p99_latency_ms: 0.0,
-            tokens_generated: 0,
-            tokens_per_second: 0.0,
+            total_requests,
+            successful_requests,
+            failed_requests,
+            requests_per_second,
+            avg_latency_ms,
+            p50_latency_ms: latency_hist.map(|h| h.min).unwrap_or(0.0), // Approximation
+            p95_latency_ms: latency_hist.map(|h| h.max * 0.95).unwrap_or(0.0), // Approximation
+            p99_latency_ms: latency_hist.map(|h| h.max * 0.99).unwrap_or(0.0), // Approximation
+            tokens_generated,
+            tokens_per_second,
         },
         resources: ResourceUtilization {
             memory_rss_bytes: report
                 .as_ref()
                 .map(|r| r.memory_used_bytes as u64)
-                .unwrap_or(0),
-            kv_cache_bytes: 0,
-            arena_bytes: 0,
-            memory_limit_bytes: 0,
+                .unwrap_or(memory_pool_bytes),
+            kv_cache_bytes: 0, // TODO: Add KV cache metrics
+            arena_bytes,
+            memory_limit_bytes: 0, // TODO: Add memory limit config
             memory_utilization_percent: 0.0,
             cpu_utilization_percent: 0.0,
             active_threads: 0,
         },
         scheduler: SchedulerStatus {
-            queue_depth: report.as_ref().map(|r| r.queue_depth as u64).unwrap_or(0),
+            queue_depth: report
+                .as_ref()
+                .map(|r| r.queue_depth as u64)
+                .unwrap_or(queue_depth),
             active_batches: 0,
-            pending_requests: 0,
-            completed_requests: 0,
+            pending_requests: queue_depth,
+            completed_requests: total_requests,
             avg_batch_size: 0.0,
         },
-        gpus: None,
-        recent_events: vec![],
+        gpus: None, // TODO: Add GPU metrics collection
+        recent_events: vec![], // TODO: Add event log query
     };
 
     Ok(status)

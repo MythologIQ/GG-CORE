@@ -12,6 +12,38 @@ use crate::engine::InferenceParams;
 use crate::health::HealthReport;
 use crate::telemetry::{ExportableSpan, MetricsSnapshot};
 
+/// Model information for diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    /// Model handle ID
+    pub handle_id: u64,
+    /// Model name
+    pub name: String,
+    /// Model format (gguf, onnx, etc.)
+    pub format: String,
+    /// Model size in bytes
+    pub size_bytes: u64,
+    /// Memory usage in bytes
+    pub memory_bytes: u64,
+    /// Current state
+    pub state: String,
+    /// Total requests processed
+    pub request_count: u64,
+    /// Average latency in milliseconds
+    pub avg_latency_ms: f64,
+    /// Timestamp when loaded (ISO 8601)
+    pub loaded_at: String,
+}
+
+/// Models list response for diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelsListResponse {
+    /// List of loaded models
+    pub models: Vec<ModelInfo>,
+    /// Total memory used by all models
+    pub total_memory_bytes: u64,
+}
+
 /// Current protocol version for new connections.
 pub const CURRENT_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V1;
 
@@ -285,6 +317,12 @@ pub enum IpcMessage {
 
     #[serde(rename = "warmup_response")]
     WarmupResponse(WarmupResponse),
+
+    #[serde(rename = "models_request")]
+    ModelsRequest,
+
+    #[serde(rename = "models_response")]
+    ModelsResponse(ModelsListResponse),
 
     #[serde(rename = "error")]
     Error { code: u32, message: String },

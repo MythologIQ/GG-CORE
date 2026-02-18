@@ -101,6 +101,45 @@ cargo +nightly fuzz run fuzz_ipc_json -- -max_total_time=300
 
 ---
 
+## Live Diagnostics
+
+### Status Command
+
+Query real-time runtime diagnostics via secure IPC:
+
+```bash
+# Human-readable output
+veritas-sdr status
+
+# JSON output for external systems
+veritas-sdr status --json
+```
+
+**Live Metrics Available**:
+
+| Category   | Metrics                                               |
+| ---------- | ----------------------------------------------------- |
+| Health     | State (healthy/degraded/unhealthy), uptime            |
+| Models     | Name, format, size, state, request count, avg latency |
+| Requests   | Total, success, failed, throughput, latency (P50-P99) |
+| Resources  | Memory (RSS, KV cache, arena), CPU, threads           |
+| Scheduler  | Queue depth, active batches, pending requests         |
+
+**Security**: All diagnostics flow through the same air-gapped IPC channel (named pipes) as inference requests. No network exposure. Safe for external system integration.
+
+### Health Probes
+
+Kubernetes-ready health endpoints:
+
+```bash
+veritas-sdr health --liveness   # Process alive?
+veritas-sdr health --readiness  # Model loaded?
+```
+
+See [Usage Guide](docs/USAGE_GUIDE.md#cli-commands) for full CLI documentation.
+
+---
+
 ## Architecture
 
 ```

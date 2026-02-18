@@ -23,7 +23,7 @@ pub use loader::{LoadError, MappedModel, ModelLoader, ModelMetadata, ModelPath};
 pub use manifest::{ModelArchitecture, ModelCapability, ModelManifest};
 pub use persistence::{PersistenceError, PersistedModel, RegistryPersistence, RegistryState};
 pub use preload::{ModelPreloader, PreloadError, PreloadedModel};
-pub use registry::{ModelHandle, ModelRegistry};
+pub use registry::{LoadedModelInfo, LoadedModelState, ModelHandle, ModelRegistry};
 pub use router::{ModelRouter, RouterError};
 pub use search::{ModelQuery, ModelQueryBuilder, ModelSearchResult};
 pub use swap::{SwapError, SwapManager, SwapResult};

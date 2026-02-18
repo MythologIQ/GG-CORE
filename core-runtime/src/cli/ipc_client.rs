@@ -14,7 +14,9 @@ use tokio::time::timeout;
 
 use crate::ipc::protocol::{
     decode_message, encode_message, HealthCheckResponse, HealthCheckType, IpcMessage,
+    ModelsListResponse,
 };
+use crate::telemetry::MetricsSnapshot;
 
 /// CLI client errors.
 #[derive(Error, Debug)]
@@ -65,6 +67,42 @@ impl CliIpcClient {
     /// Get full health report via IPC.
     pub async fn get_health_report(&self) -> Result<HealthCheckResponse, CliError> {
         self.send_health_request(HealthCheckType::Full).await
+    }
+
+    /// Get metrics snapshot via IPC.
+    pub async fn get_metrics(&self) -> Result<MetricsSnapshot, CliError> {
+        let message = IpcMessage::MetricsRequest;
+        let request_bytes =
+            encode_message(&message).map_err(|e| CliError::Protocol(e.to_string()))?;
+
+        let response_bytes = self.send_receive(&request_bytes).await?;
+
+        let response =
+            decode_message(&response_bytes).map_err(|e| CliError::Protocol(e.to_string()))?;
+
+        match response {
+            IpcMessage::MetricsResponse(snapshot) => Ok(snapshot),
+            IpcMessage::Error { message, .. } => Err(CliError::Protocol(message)),
+            _ => Err(CliError::Protocol("Unexpected response type".to_string())),
+        }
+    }
+
+    /// Get loaded models list via IPC.
+    pub async fn get_models(&self) -> Result<ModelsListResponse, CliError> {
+        let message = IpcMessage::ModelsRequest;
+        let request_bytes =
+            encode_message(&message).map_err(|e| CliError::Protocol(e.to_string()))?;
+
+        let response_bytes = self.send_receive(&request_bytes).await?;
+
+        let response =
+            decode_message(&response_bytes).map_err(|e| CliError::Protocol(e.to_string()))?;
+
+        match response {
+            IpcMessage::ModelsResponse(models) => Ok(models),
+            IpcMessage::Error { message, .. } => Err(CliError::Protocol(message)),
+            _ => Err(CliError::Protocol("Unexpected response type".to_string())),
+        }
     }
 
     async fn send_health_request(

@@ -17,7 +17,8 @@ pub use handler::{IpcHandler, IpcHandlerConfig, StreamSender};
 pub use protocol::{
     decode_message, decode_message_binary, encode_message, encode_message_binary,
     HealthCheckResponse, HealthCheckType, InferenceRequest, InferenceResponse, IpcMessage,
-    ProtocolError, ProtocolVersion, RequestId, StreamChunk, WarmupRequest, WarmupResponse,
+    ModelInfo, ModelsListResponse, ProtocolError, ProtocolVersion, RequestId, StreamChunk,
+    WarmupRequest, WarmupResponse,
 };
 // Re-export MetricsSnapshot for IPC consumers
 pub use crate::telemetry::MetricsSnapshot;

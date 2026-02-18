@@ -604,6 +604,161 @@ pub struct ModelEncryption {
 
 ---
 
+## CLI Commands
+
+### Status Command
+
+Query live runtime diagnostics via IPC (named pipes). Safe for external system integration.
+
+```bash
+# Human-readable output
+veritas-sdr status
+
+# JSON output for programmatic consumption
+veritas-sdr status --json
+```
+
+**Output Sections**:
+
+| Section    | Contents                                                    |
+| ---------- | ----------------------------------------------------------- |
+| Health     | Overall state (healthy/degraded/unhealthy), uptime          |
+| Models     | Loaded models with state, size, request counts, avg latency |
+| Requests   | Total/success/failed, throughput, latency percentiles       |
+| Resources  | Memory (RSS, KV cache, arena), CPU utilization              |
+| GPUs       | Per-GPU memory, utilization, temperature (if available)     |
+| Scheduler  | Queue depth, active batches, pending requests               |
+| Events     | Recent system events (last 10)                              |
+
+**JSON Schema** (for `--json` output):
+
+```json
+{
+  "health": "healthy",
+  "uptime_secs": 3600,
+  "version": {
+    "version": "0.6.0",
+    "commit": "abc123",
+    "build_date": "2026-02-18",
+    "rust_version": "1.75.0"
+  },
+  "models": [
+    {
+      "name": "phi-3-mini",
+      "format": "gguf",
+      "size_bytes": 2400000000,
+      "state": "ready",
+      "request_count": 1500,
+      "avg_latency_ms": 42.5
+    }
+  ],
+  "requests": {
+    "total_requests": 10000,
+    "successful_requests": 9950,
+    "failed_requests": 50,
+    "requests_per_second": 2.8,
+    "tokens_generated": 500000,
+    "tokens_per_second": 138.9
+  },
+  "resources": {
+    "memory_rss_bytes": 4294967296,
+    "kv_cache_bytes": 2147483648,
+    "arena_bytes": 536870912
+  }
+}
+```
+
+### Health Probes
+
+For Kubernetes liveness/readiness:
+
+```bash
+# Liveness probe (is process alive?)
+veritas-sdr health --liveness
+
+# Readiness probe (is model loaded and accepting requests?)
+veritas-sdr health --readiness
+
+# Full health report
+veritas-sdr health --full
+```
+
+**Exit Codes**:
+
+| Code | Meaning                     |
+| ---- | --------------------------- |
+| 0    | Healthy                     |
+| 1    | Protocol/system error       |
+| 2    | Unhealthy                   |
+| 3    | Connection failed (offline) |
+
+---
+
+## IPC Protocol
+
+### Model Query Messages
+
+External systems can query model status via the IPC protocol:
+
+**Request**:
+```json
+{"type": "models_request"}
+```
+
+**Response**:
+```json
+{
+  "type": "models_response",
+  "models": [
+    {
+      "handle_id": 1,
+      "name": "phi-3-mini",
+      "format": "gguf",
+      "size_bytes": 2400000000,
+      "memory_bytes": 2600000000,
+      "state": "ready",
+      "request_count": 1500,
+      "avg_latency_ms": 42.5,
+      "loaded_at": "2026-02-18T14:30:00Z"
+    }
+  ],
+  "total_memory_bytes": 2600000000
+}
+```
+
+### Metrics Query Messages
+
+**Request**:
+```json
+{"type": "metrics_request"}
+```
+
+**Response**:
+```json
+{
+  "type": "metrics_response",
+  "counters": {
+    "core_requests_total": 10000,
+    "core_requests_success": 9950,
+    "core_tokens_output_total": 500000
+  },
+  "gauges": {
+    "core_memory_pool_used_bytes": 4294967296,
+    "core_queue_depth": 5
+  },
+  "histograms": {
+    "core_inference_latency_ms": {
+      "count": 10000,
+      "sum": 425000,
+      "min": 10.0,
+      "max": 250.0
+    }
+  }
+}
+```
+
+---
+
 ## Support
 
 - **Issues**: GitHub Issues
@@ -613,5 +768,5 @@ pub struct ModelEncryption {
 
 ---
 
-Copyright 2024-2026 Veritas SDR Contributors  
+Copyright 2024-2026 Veritas SDR Contributors
 Licensed under the Apache License, Version 2.0
