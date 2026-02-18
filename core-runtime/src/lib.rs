@@ -111,7 +111,7 @@ pub struct Runtime {
     pub context_cache: ContextCache,
     pub model_loader: ModelLoader,
     pub model_registry: Arc<ModelRegistry>,
-    pub inference_engine: InferenceEngine,
+    pub inference_engine: Arc<InferenceEngine>,
     pub request_queue: Arc<RequestQueue>,
     pub batch_processor: BatchProcessor,
     pub ipc_handler: IpcHandler,
@@ -140,6 +140,7 @@ impl Runtime {
         let connections = Arc::new(ConnectionPool::new(config.connections.clone()));
 
         let session_auth = Arc::new(SessionAuth::new(&config.auth_token, config.session_timeout));
+        let inference_engine = Arc::new(inference_engine);
         let ipc_handler = IpcHandler::new(
             session_auth,
             request_queue.clone(),
@@ -148,6 +149,7 @@ impl Runtime {
             health.clone(),
             model_registry.clone(),
             metrics_store.clone(),
+            Arc::clone(&inference_engine),
         );
 
         Self {

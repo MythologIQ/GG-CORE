@@ -96,10 +96,14 @@ impl InferenceEngine {
             });
         }
 
-        // Placeholder: actual inference would happen here via candle
+        // Development mode: generate mock tokens proportional to input
+        // TODO: Replace with actual inference via candle/llama-cpp when model integration is complete
+        let generated_count = params.max_tokens.min(input_tokens.len().saturating_add(10));
+        let output_tokens: Vec<u32> = (0..generated_count as u32).collect();
+
         Ok(InferenceResult {
-            output_tokens: Vec::new(),
-            tokens_generated: 0,
+            output_tokens,
+            tokens_generated: generated_count,
             finished: true,
         })
     }

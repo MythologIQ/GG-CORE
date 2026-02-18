@@ -6,11 +6,12 @@ use thiserror::Error;
 use super::auth::{AuthError, SessionAuth, SessionToken};
 use super::health_handler::HealthHandler;
 use super::protocol::{
-    decode_message, encode_message, InferenceRequest, InferenceResponse, IpcMessage, ProtocolError,
-    ProtocolVersion, StreamChunk, WarmupResponse,
+    decode_message, encode_message, InferenceRequest, InferenceResponse, IpcMessage, ModelInfo,
+    ModelsListResponse, ProtocolError, ProtocolVersion, StreamChunk, WarmupResponse,
 };
+use crate::engine::InferenceEngine;
 use crate::health::HealthChecker;
-use crate::models::ModelRegistry;
+use crate::models::{ModelHandle, ModelRegistry};
 use crate::scheduler::Priority;
 use crate::scheduler::RequestQueue;
 use crate::shutdown::ShutdownCoordinator;
@@ -56,6 +57,19 @@ pub trait StreamSender: Send + Sync {
     async fn send(&self, message: IpcMessage) -> Result<(), HandlerError>;
 }
 
+/// Format SystemTime as ISO 8601 string for IPC responses.
+fn format_system_time(time: std::time::SystemTime) -> String {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| {
+            let secs = d.as_secs();
+            let datetime = chrono::DateTime::from_timestamp(secs as i64, 0);
+            datetime
+                .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                .unwrap_or_else(|| format!("{}s", secs))
+        })
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
 /// Handles IPC message processing with authentication.
 pub struct IpcHandler {
     /// Session authentication manager (public for FFI access)
@@ -65,6 +79,8 @@ pub struct IpcHandler {
     shutdown: Arc<ShutdownCoordinator>,
     health_handler: HealthHandler,
     metrics_store: Arc<MetricsStore>,
+    model_registry: Arc<ModelRegistry>,
+    inference_engine: Arc<InferenceEngine>,
 }
 
 impl IpcHandler {
@@ -76,11 +92,12 @@ impl IpcHandler {
         health: Arc<HealthChecker>,
         model_registry: Arc<ModelRegistry>,
         metrics_store: Arc<MetricsStore>,
+        inference_engine: Arc<InferenceEngine>,
     ) -> Self {
         let health_handler = HealthHandler::new(
             health,
             Arc::clone(&shutdown),
-            model_registry,
+            Arc::clone(&model_registry),
             Arc::clone(&queue),
         );
         Self {
@@ -90,6 +107,8 @@ impl IpcHandler {
             shutdown,
             health_handler,
             metrics_store,
+            model_registry,
+            inference_engine,
         }
     }
 
@@ -141,6 +160,12 @@ impl IpcHandler {
                 // NO AUTH REQUIRED for metrics (orchestrator pattern, same as health)
                 let snapshot = self.metrics_store.snapshot();
                 Ok((IpcMessage::MetricsResponse(snapshot), None))
+            }
+
+            IpcMessage::ModelsRequest => {
+                // NO AUTH REQUIRED for model listing (orchestrator pattern, same as health/metrics)
+                let response = self.handle_models_request().await;
+                Ok((IpcMessage::ModelsResponse(response), None))
             }
 
             IpcMessage::CancelRequest { request_id } => {
@@ -198,18 +223,44 @@ impl IpcHandler {
             return InferenceResponse::error(request.request_id, e.to_string());
         }
 
+        // Track request in queue for metrics
         let enqueue_result = self
             .queue
             .enqueue(
-                request.model_id,
-                request.prompt_tokens,
-                request.parameters,
+                request.model_id.clone(),
+                request.prompt_tokens.clone(),
+                request.parameters.clone(),
                 Priority::Normal,
             )
             .await;
 
-        match enqueue_result {
-            Ok(_) => InferenceResponse::success(request.request_id, Vec::new(), false),
+        if let Err(e) = enqueue_result {
+            return InferenceResponse::error(request.request_id, e.to_string());
+        }
+
+        // Run inference synchronously for IPC requests
+        // TODO: Use model_id to look up actual model handle from registry
+        let model_handle = ModelHandle::new(0);
+        let start = std::time::Instant::now();
+
+        match self
+            .inference_engine
+            .run(model_handle, &request.prompt_tokens, &request.parameters)
+            .await
+        {
+            Ok(result) => {
+                // Record latency in model registry
+                let latency_ms = start.elapsed().as_millis() as f64;
+                self.model_registry
+                    .record_request(model_handle, latency_ms)
+                    .await;
+
+                InferenceResponse::success(
+                    request.request_id,
+                    result.output_tokens,
+                    result.finished,
+                )
+            }
             Err(e) => InferenceResponse::error(request.request_id, e.to_string()),
         }
         // guard dropped here, decrementing in-flight count
@@ -230,6 +281,38 @@ impl IpcHandler {
         match result {
             Ok(_) => WarmupResponse::success(model_id, elapsed_ms),
             Err(e) => WarmupResponse::error(model_id, e.to_string(), elapsed_ms),
+        }
+    }
+
+    async fn handle_models_request(&self) -> ModelsListResponse {
+        let models = self.model_registry.list_models().await;
+        let total_memory_bytes = models.iter().map(|m| m.memory_bytes).sum();
+
+        let model_infos: Vec<ModelInfo> = models
+            .into_iter()
+            .map(|m| {
+                let avg_latency_ms = if m.request_count > 0 {
+                    m.total_latency_ms / m.request_count as f64
+                } else {
+                    0.0
+                };
+                ModelInfo {
+                    handle_id: m.handle_id,
+                    name: m.name,
+                    format: m.format,
+                    size_bytes: m.size_bytes,
+                    memory_bytes: m.memory_bytes,
+                    state: m.state.as_str().to_string(),
+                    request_count: m.request_count,
+                    avg_latency_ms,
+                    loaded_at: format_system_time(m.loaded_at),
+                }
+            })
+            .collect();
+
+        ModelsListResponse {
+            models: model_infos,
+            total_memory_bytes,
         }
     }
 
