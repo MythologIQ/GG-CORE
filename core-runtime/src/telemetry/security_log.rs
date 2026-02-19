@@ -107,6 +107,8 @@ impl SecuritySeverity {
 ///
 /// # Example
 /// ```
+/// use veritas_sdr::telemetry::{log_security_event, SecurityEvent};
+///
 /// log_security_event(
 ///     SecurityEvent::AuthFailure,
 ///     "Invalid handshake token",

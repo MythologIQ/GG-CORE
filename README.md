@@ -6,7 +6,7 @@ A security-first inference runtime for air-gapped and compliance-sensitive envir
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Security](https://img.shields.io/badge/Security-Hardened-brightgreen.svg)](docs/security/THREAT_MODEL.md)
-[![Tests](https://img.shields.io/badge/Tests-430%2B-blue.svg)](docs/testing/)
+[![Tests](https://img.shields.io/badge/Tests-1124-blue.svg)](docs/testing/)
 
 ---
 
@@ -59,7 +59,7 @@ Veritas SDR is a sandboxed, offline inference engine providing comprehensive sec
 | Single binary distribution    | MIT/Apache dependencies, static linking     |
 | Rust memory safety            | Language guarantee, no unsafe in core paths |
 | 361ns infrastructure overhead | Benchmark verified                          |
-| 430+ security tests           | Full test suite passing                     |
+| 1,124 tests (100% pass rate)  | Full test suite passing                     |
 
 ---
 
@@ -109,10 +109,10 @@ Query real-time runtime diagnostics via secure IPC:
 
 ```bash
 # Human-readable output
-veritas-sdr status
+veritas-sdr-cli status
 
 # JSON output for external systems
-veritas-sdr status --json
+veritas-sdr-cli status --json
 ```
 
 **Live Metrics Available**:
@@ -132,8 +132,8 @@ veritas-sdr status --json
 Kubernetes-ready health endpoints:
 
 ```bash
-veritas-sdr health --liveness   # Process alive?
-veritas-sdr health --readiness  # Model loaded?
+veritas-sdr-cli health --liveness   # Process alive?
+veritas-sdr-cli health --readiness  # Model loaded?
 ```
 
 See [Usage Guide](docs/USAGE_GUIDE.md#cli-commands) for full CLI documentation.

@@ -60,11 +60,13 @@ pub use speculative_v2::{
     SpeculativeConfig as SpeculativeV2Config, SpeculativeDecoder as SpeculativeV2Decoder,
     SpeculativeStats,
 };
-pub use streaming::{StreamingOutput, TokenStream};
+pub use streaming::{StreamingOutput, TokenStream, TokenStreamSender};
 pub use tokenizer::{TokenizerError, TokenizerWrapper};
 
 // Backend re-exports
 pub use gguf::{GgufConfig, GgufGenerator, GgufModel};
+#[cfg(feature = "gguf")]
+pub use gguf::LlamaBackendInner;
 pub use gpu::{GpuBackend, GpuConfig, GpuDevice, GpuError, GpuManager, GpuMemory, GpuMemoryPool};
 pub use onnx::{OnnxClassifier, OnnxConfig, OnnxEmbedder, OnnxModel};
 

@@ -112,9 +112,11 @@ mod tests {
         metrics.get_or_create(&VariantLabel::control());
         assert!(metrics.get(&VariantLabel::control()).is_some());
 
-        // Second call returns existing
-        let stats = metrics.get_or_create(&VariantLabel::control());
-        stats.record_request();
+        // Second call returns existing - drop RefMut before re-entering DashMap
+        {
+            let stats = metrics.get_or_create(&VariantLabel::control());
+            stats.record_request();
+        } // RefMut write lock released here
 
         assert_eq!(
             metrics

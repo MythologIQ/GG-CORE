@@ -366,12 +366,9 @@ mod tests {
         }
         let duration = start.elapsed();
 
-        // Should complete 10k scans in under 200ms (20µs per scan)
-        assert!(
-            duration.as_millis() < 200,
-            "Scanning too slow: {:?}",
-            duration
-        );
+        // Release: 10k scans in <200 ms. Debug: allow 10 s (no optimizations).
+        let max_ms: u128 = if cfg!(debug_assertions) { 10_000 } else { 200 };
+        assert!(duration.as_millis() < max_ms, "Scanning too slow: {:?}", duration);
     }
 
     #[test]
@@ -387,11 +384,8 @@ mod tests {
         }
         let duration = start.elapsed();
 
-        // Should complete 1k scans of 2500 char text in under 500ms
-        assert!(
-            duration.as_millis() < 500,
-            "Long text scanning too slow: {:?}",
-            duration
-        );
+        // Release: 1k scans in <500 ms. Debug: allow 30 s (no optimizations).
+        let max_ms: u128 = if cfg!(debug_assertions) { 30_000 } else { 500 };
+        assert!(duration.as_millis() < max_ms, "Long text scanning too slow: {:?}", duration);
     }
 }

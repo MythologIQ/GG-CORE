@@ -1,8 +1,8 @@
 # Veritas SDR Documentation
 
-**Version:** 1.0.0  
-**License:** Apache 2.0  
-**Last Updated:** 2026-02-16
+**Version:** 0.6.0
+**License:** Apache 2.0
+**Last Updated:** 2026-02-19
 
 ---
 
@@ -612,10 +612,10 @@ Query live runtime diagnostics via IPC (named pipes). Safe for external system i
 
 ```bash
 # Human-readable output
-veritas-sdr status
+veritas-sdr-cli status
 
 # JSON output for programmatic consumption
-veritas-sdr status --json
+veritas-sdr-cli status --json
 ```
 
 **Output Sections**:
@@ -674,13 +674,13 @@ For Kubernetes liveness/readiness:
 
 ```bash
 # Liveness probe (is process alive?)
-veritas-sdr health --liveness
+veritas-sdr-cli health --liveness
 
 # Readiness probe (is model loaded and accepting requests?)
-veritas-sdr health --readiness
+veritas-sdr-cli health --readiness
 
 # Full health report
-veritas-sdr health --full
+veritas-sdr-cli health --full
 ```
 
 **Exit Codes**:

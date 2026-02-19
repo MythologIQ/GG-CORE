@@ -9,9 +9,10 @@ pub mod encoding;
 mod handler;
 mod health_handler;
 pub mod protocol;
+pub mod server;
 
 pub use auth::{AuthError, SessionAuth, SessionToken};
-pub use connections::{ConnectionConfig, ConnectionGuard, ConnectionPool};
+pub use connections::{ConnectionConfig, ConnectionGuard, ConnectionPool, OwnedConnectionGuard};
 pub use encoding::{get_encoder, TokenEncoder, V1Encoder, V2Encoder};
 pub use handler::{IpcHandler, IpcHandlerConfig, StreamSender};
 pub use protocol::{

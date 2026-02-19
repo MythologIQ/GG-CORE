@@ -568,14 +568,16 @@ mod tests {
 
         assert_eq!(plaintext, decrypted);
 
-        // Should encrypt/decrypt 1MB in under 1 second
+        // Release builds: 1 MB must complete in <1 s.
+        // Debug builds: allow 30 s (no optimizations).
+        let max_ms: u128 = if cfg!(debug_assertions) { 30_000 } else { 1_000 };
         assert!(
-            encrypt_time.as_millis() < 1000,
+            encrypt_time.as_millis() < max_ms,
             "Encryption too slow: {:?}",
             encrypt_time
         );
         assert!(
-            decrypt_time.as_millis() < 1000,
+            decrypt_time.as_millis() < max_ms,
             "Decryption too slow: {:?}",
             decrypt_time
         );

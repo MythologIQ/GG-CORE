@@ -18,6 +18,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use veritas_sdr::cli::{get_socket_path, run_health, run_liveness, run_readiness, run_status};
+use veritas_sdr::ipc::server;
 use veritas_sdr::security::fips_tests;
 use veritas_sdr::shutdown::ShutdownResult;
 use veritas_sdr::{Runtime, RuntimeConfig};
@@ -425,32 +426,39 @@ fn load_config() -> RuntimeConfig {
 }
 
 async fn run_ipc_server(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
-    // IPC server loop would go here
-    // Using interprocess crate for named pipes/Unix sockets
-    //
-    // Placeholder: actual IPC binding requires platform-specific setup
-    // The handler is ready: runtime.ipc_handler.process(bytes, session)
+    let socket_path = get_socket_path();
+    let handler = std::sync::Arc::new(runtime.ipc_handler);
+    let connections = runtime.connections;
+    let shutdown = runtime.shutdown;
+    let shutdown_timeout = runtime.config.shutdown_timeout;
 
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("Shutdown signal received, draining...");
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-                let result = runtime.shutdown.initiate(
-                    runtime.config.shutdown_timeout
-                ).await;
+    let server_handle = tokio::spawn(server::run_server(
+        socket_path,
+        handler,
+        connections,
+        shutdown_rx,
+    ));
 
-                match result {
-                    ShutdownResult::Complete => {
-                        eprintln!("Shutdown complete");
-                    }
-                    ShutdownResult::Timeout { remaining } => {
-                        eprintln!("Shutdown timeout, {} requests remaining", remaining);
-                    }
-                }
-                break;
-            }
+    // Wait for Ctrl+C, then initiate graceful shutdown
+    tokio::signal::ctrl_c().await?;
+    eprintln!("Shutdown signal received, draining...");
+
+    // Signal the server loop to stop accepting
+    let _ = shutdown_tx.send(true);
+
+    // Drain in-flight requests
+    match shutdown.initiate(shutdown_timeout).await {
+        ShutdownResult::Complete => eprintln!("Shutdown complete"),
+        ShutdownResult::Timeout { remaining } => {
+            eprintln!("Shutdown timeout, {} requests remaining", remaining);
         }
+    }
+
+    // Wait for server task to finish
+    if let Err(e) = server_handle.await? {
+        eprintln!("Server error: {}", e);
     }
 
     Ok(())

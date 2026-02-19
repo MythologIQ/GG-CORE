@@ -2,9 +2,13 @@
 //!
 //! Provides text generation models via llama.cpp bindings.
 
+#[cfg(feature = "gguf")]
+pub mod backend;
 mod generator;
 
 pub use generator::GgufGenerator;
+#[cfg(feature = "gguf")]
+pub use backend::LlamaBackendInner;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -49,25 +53,25 @@ pub trait GgufModel: Send + Sync {
     async fn unload(&mut self) -> Result<(), InferenceError>;
 }
 
-/// Load a GGUF model from a file path.
-///
-/// # Arguments
-/// * `path` - Path to the .gguf model file
-/// * `model_id` - Unique identifier for this model instance
-/// * `config` - GGUF configuration options
+/// Load a GGUF model from a file path using llama-cpp-2.
 ///
 /// # Errors
-/// Returns error if model cannot be loaded or is invalid format.
+/// Returns error if model file is missing, invalid, or fails to load.
 #[cfg(feature = "gguf")]
 pub fn load_gguf_model(
-    _path: &Path,
-    _model_id: &str,
-    _config: &GgufConfig,
+    path: &Path,
+    model_id: &str,
+    config: &GgufConfig,
 ) -> Result<Arc<dyn GgufModel>, InferenceError> {
-    // Actual llama-cpp-2 loading would go here
-    Err(InferenceError::ModelError(
-        "GGUF model loading requires llama-cpp implementation".into(),
-    ))
+    if !path.exists() {
+        return Err(InferenceError::ModelError(
+            format!("model file not found: {}", path.display()),
+        ));
+    }
+    let generator = GgufGenerator::load(
+        model_id.to_string(), path, config,
+    )?;
+    Ok(Arc::new(generator))
 }
 
 /// Stub for non-gguf builds.

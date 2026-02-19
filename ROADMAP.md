@@ -1,7 +1,7 @@
 # Veritas SDR Feature Roadmap
 
-**Last Updated:** 2026-02-17
-**Version:** 0.5.0
+**Last Updated:** 2026-02-19
+**Version:** 0.6.0
 
 ---
 
@@ -223,7 +223,66 @@ Veritas SDR is in pre-production status. Core functionality is complete and test
 
 ---
 
-## Planned Features (v0.6.0)
+## Completed Features (v0.6.0)
+
+### Functional GGUF Backend
+
+- [x] Real model loading via llama-cpp-2 (v0.1.133)
+- [x] Tokenization and detokenization support
+- [x] Token streaming via async channels
+- [x] Context management and batch processing
+- [x] UTF-8 decoding for token pieces (encoding_rs)
+
+### GGUF Architecture
+
+- [`engine/gguf/backend.rs`](core-runtime/src/engine/gguf/backend.rs) - LlamaBackendInner implementation
+- [`engine/tokenizer.rs`](core-runtime/src/engine/tokenizer.rs) - Unified tokenizer with backend delegation
+- [`engine/gguf/generator.rs`](core-runtime/src/engine/gguf/generator.rs) - Model loading and generation
+
+### Functional IPC Server
+
+- [x] Platform-specific server loop (Unix sockets / Windows named pipes)
+- [x] 4-byte length-prefixed framing protocol
+- [x] Connection pooling with configurable limits
+- [x] Graceful shutdown with request draining
+- [x] Owned connection guards for async tasks
+
+### IPC Architecture
+
+- [`ipc/server.rs`](core-runtime/src/ipc/server.rs) - Server loop implementation
+- [`ipc/connections.rs`](core-runtime/src/ipc/connections.rs) - Connection pooling and guards
+- [`main.rs`](core-runtime/src/main.rs) - Signal handling and server integration
+
+### Chaos Testing Suite
+
+- [x] Protocol fault injection tests (malformed JSON, truncated messages)
+- [x] Type confusion and extreme payload testing
+- [x] Scheduler shutdown resilience tests
+- [x] Health check chaos testing
+- [x] Stream and model chaos testing
+- [x] IPC server integration tests (framing, connections, routing)
+
+### Test Architecture
+
+- [`tests/chaos_resilience_test.rs`](core-runtime/tests/chaos_resilience_test.rs) - Protocol fault injection
+- [`tests/ipc_server_test.rs`](core-runtime/tests/ipc_server_test.rs) - Server integration tests
+- Plus 3 additional chaos test files for scheduler, health, and streaming
+
+### Build System Improvements
+
+- [x] Binary renamed to `veritas-sdr-cli` (fixes PDB collision)
+- [x] Removed bincode (incompatible with internally-tagged enums)
+- [x] Version-pinned llama-cpp-2 to 0.1.133
+- [x] Added encoding_rs for UTF-8 token decoding
+- [x] Readable mock output for development mode
+
+**Status:** Complete
+
+**Test Coverage:** 1,124 tests (100% pass rate)
+
+---
+
+## Planned Features (v0.7.0)
 
 ### Security
 
@@ -256,16 +315,17 @@ Veritas SDR is in pre-production status. Core functionality is complete and test
 
 ## Release Timeline
 
-| Version   | Status    | Focus                              |
-| --------- | --------- | ---------------------------------- |
-| **0.1.0** | Complete  | Core functionality, security       |
-| **0.2.0** | Complete  | GPU support (CUDA/Metal)           |
-| **0.2.1** | Complete  | Benchmarking, comparison           |
-| **0.3.0** | Complete  | C FFI & Python bindings            |
-| **0.4.0** | Complete  | Observability, MoE                 |
-| **0.5.0** | Complete  | Enterprise features                |
-| **0.6.0** | Planned   | Security audit, deployments        |
-| **1.0.0** | Planned   | Production stable release          |
+| Version   | Status    | Focus                                    |
+| --------- | --------- | ---------------------------------------- |
+| **0.1.0** | Complete  | Core functionality, security             |
+| **0.2.0** | Complete  | GPU support (CUDA/Metal)                 |
+| **0.2.1** | Complete  | Benchmarking, comparison                 |
+| **0.3.0** | Complete  | C FFI & Python bindings                  |
+| **0.4.0** | Complete  | Observability, MoE                       |
+| **0.5.0** | Complete  | Enterprise features                      |
+| **0.6.0** | Complete  | Functional GGUF backend, IPC server      |
+| **0.7.0** | Planned   | Security audit, deployments              |
+| **1.0.0** | Planned   | Production stable release                |
 
 ---
 

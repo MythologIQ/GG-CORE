@@ -193,14 +193,7 @@ impl KvCache {
     fn evict_one(&self) {
         // DashMap's iter().next() can be slow for large maps.
         // Instead, try to remove one entry directly by probing shards.
-        let key_to_remove = {
-            let mut found_key = None;
-            for entry in self.entries.iter() {
-                found_key = Some(entry.key().clone());
-                break;
-            }
-            found_key
-        };
+        let key_to_remove = self.entries.iter().next().map(|entry| entry.key().clone());
         if let Some(key) = key_to_remove {
             self.entries.remove(&key);
         }

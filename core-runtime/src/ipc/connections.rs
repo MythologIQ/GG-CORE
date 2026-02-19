@@ -3,6 +3,7 @@
 //! Provides global connection limiting with RAII guards.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Configuration for connection pool.
 #[derive(Debug, Clone)]
@@ -60,6 +61,26 @@ impl ConnectionPool {
         self.config.max_connections
     }
 
+    /// Try to acquire a connection slot with owned Arc guard.
+    /// Suitable for spawned tasks that require `'static` lifetime.
+    pub fn try_acquire_owned(self: &Arc<Self>) -> Option<OwnedConnectionGuard> {
+        loop {
+            let current = self.active.load(Ordering::Relaxed);
+            if current >= self.config.max_connections {
+                return None;
+            }
+            if self
+                .active
+                .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Some(OwnedConnectionGuard {
+                    pool: Arc::clone(self),
+                });
+            }
+        }
+    }
+
     fn release(&self) {
         self.active.fetch_sub(1, Ordering::SeqCst);
     }
@@ -71,6 +92,17 @@ pub struct ConnectionGuard<'a> {
 }
 
 impl Drop for ConnectionGuard<'_> {
+    fn drop(&mut self) {
+        self.pool.release();
+    }
+}
+
+/// Owned RAII guard for spawned tasks (`'static` lifetime).
+pub struct OwnedConnectionGuard {
+    pool: Arc<ConnectionPool>,
+}
+
+impl Drop for OwnedConnectionGuard {
     fn drop(&mut self) {
         self.pool.release();
     }

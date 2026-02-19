@@ -1,6 +1,6 @@
 //! GGUF-based text generation model.
 //!
-//! Wraps llama-cpp-rs for text generation tasks.
+//! Wraps llama-cpp-2 for text generation tasks.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,48 +9,92 @@ use crate::engine::{
     InferenceError, InferenceInput, InferenceOutput,
 };
 
-/// GGUF text generation model using llama-cpp-rs.
+/// GGUF text generation model using llama-cpp-2.
 pub struct GgufGenerator {
     model_id: String,
     memory_bytes: AtomicUsize,
-    /// Context window size (used when llama-cpp backend is enabled)
     #[allow(dead_code)]
     context_size: u32,
     #[cfg(feature = "gguf")]
-    _model: Option<()>, // Placeholder for llama-cpp model
+    inner: Option<super::super::backend::LlamaBackendInner>,
 }
 
 impl GgufGenerator {
-    /// Create a new generator with the given model ID.
+    /// Create a new generator (no model loaded yet).
     pub fn new(model_id: String, context_size: u32) -> Self {
         Self {
             model_id,
             memory_bytes: AtomicUsize::new(0),
             context_size,
             #[cfg(feature = "gguf")]
-            _model: None,
+            inner: None,
         }
     }
 
-    /// Generate text from a prompt.
+    /// Load a model from a GGUF file path.
+    #[cfg(feature = "gguf")]
+    pub fn load(
+        model_id: String,
+        path: &std::path::Path,
+        config: &super::GgufConfig,
+    ) -> Result<Self, InferenceError> {
+        let inner = super::backend::LlamaBackendInner::load(path, config)?;
+        let mem = inner.model_size();
+        Ok(Self {
+            model_id,
+            memory_bytes: AtomicUsize::new(mem),
+            context_size: config.n_ctx,
+            inner: Some(inner),
+        })
+    }
+
+    /// Generate text from a prompt string.
     fn generate_text(
         &self,
         prompt: &str,
-        max_tokens: u32,
+        config: &InferenceConfig,
     ) -> Result<GenerationResult, InferenceError> {
         if prompt.is_empty() {
-            return Err(InferenceError::InputValidation("prompt cannot be empty".into()));
+            return Err(InferenceError::InputValidation(
+                "prompt cannot be empty".into(),
+            ));
         }
+        #[cfg(feature = "gguf")]
+        {
+            if let Some(inner) = &self.inner {
+                return inner.generate(prompt, config);
+            }
+        }
+        self.mock_generate(prompt, config)
+    }
 
-        // Stub: Return mock generation result
-        // Real implementation would run llama-cpp inference
-        let generated = format!("[Generated from: {}...]", &prompt[..prompt.len().min(20)]);
-
+    fn mock_generate(
+        &self,
+        prompt: &str,
+        config: &InferenceConfig,
+    ) -> Result<GenerationResult, InferenceError> {
+        let max_tokens = config.max_tokens.unwrap_or(256);
+        let preview_len = prompt.len().min(20);
+        let text = format!("[Generated from: {}...]", &prompt[..preview_len]);
         Ok(GenerationResult {
-            text: generated,
+            text,
             tokens_generated: max_tokens.min(10),
             finish_reason: FinishReason::MaxTokens,
         })
+    }
+
+    /// Stream tokens for a prompt, sending each to the channel.
+    #[cfg(feature = "gguf")]
+    pub fn generate_stream(
+        &self,
+        prompt: &str,
+        config: &InferenceConfig,
+        sender: crate::engine::TokenStreamSender,
+    ) -> Result<(), InferenceError> {
+        if let Some(inner) = &self.inner {
+            return inner.generate_stream(prompt, config, sender);
+        }
+        Err(InferenceError::ModelError("no model loaded".into()))
     }
 
     /// Format chat messages into a prompt string.
@@ -60,12 +104,12 @@ impl GgufGenerator {
     ) -> Result<String, InferenceError> {
         let mut prompt = String::new();
         for msg in messages {
-            let role_tag = match msg.role {
+            let tag = match msg.role {
                 crate::engine::ChatRole::System => "<|system|>",
                 crate::engine::ChatRole::User => "<|user|>",
                 crate::engine::ChatRole::Assistant => "<|assistant|>",
             };
-            prompt.push_str(role_tag);
+            prompt.push_str(tag);
             prompt.push_str(&msg.content);
             prompt.push_str("<|end|>\n");
         }
@@ -96,21 +140,21 @@ impl super::GgufModel for GgufGenerator {
         input.validate()?;
         config.validate()?;
 
-        let max_tokens = config.max_tokens.unwrap_or(256);
-
         match input {
             InferenceInput::Text(prompt) => {
-                let result = self.generate_text(prompt, max_tokens)?;
+                let result = self.generate_text(prompt, config)?;
                 Ok(InferenceOutput::Generation(result))
             }
             InferenceInput::ChatMessages(messages) => {
                 let prompt = self.format_chat_prompt(messages)?;
-                let result = self.generate_text(&prompt, max_tokens)?;
+                let result = self.generate_text(&prompt, config)?;
                 Ok(InferenceOutput::Generation(result))
             }
-            InferenceInput::TextBatch(_) => Err(InferenceError::CapabilityNotSupported(
-                "batch generation not supported".into(),
-            )),
+            InferenceInput::TextBatch(_) => {
+                Err(InferenceError::CapabilityNotSupported(
+                    "batch generation not supported".into(),
+                ))
+            }
         }
     }
 
@@ -118,7 +162,7 @@ impl super::GgufModel for GgufGenerator {
         self.memory_bytes.store(0, Ordering::SeqCst);
         #[cfg(feature = "gguf")]
         {
-            self._model = None;
+            self.inner = None;
         }
         Ok(())
     }
