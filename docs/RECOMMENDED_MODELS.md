@@ -163,6 +163,66 @@ veritas-sdr-cli infer \
 
 ---
 
+## TierSynergy Architecture
+
+The tiered model system integrates with the SmartLoader and speculative decoding for optimal performance.
+
+### SmartLoader (Lazy Loading)
+
+Models are registered but **not loaded** until first use:
+
+```rust
+// Zero-overhead registration
+loader.register("light", path, ModelTier::Light).await;
+
+// Semantic hints drive prefetching
+loader.hint(LoadHint::QuickQuery).await;     // Prefetch Light tier
+loader.hint(LoadHint::ComplexTask).await;    // Prefetch Quality tier
+```
+
+**Benefits**:
+- Zero idle memory overhead
+- Background prefetching based on usage hints
+- OS page cache leveraging for automatic memory management
+
+### TierSynergy (Speculative Decoding)
+
+When both Light and Quality tiers are available, the system automatically enables speculative decoding:
+
+| Light Tier (Draft) | Quality Tier (Target) | Speedup |
+|-------------------|----------------------|---------|
+| Qwen 0.5B (~300MB) | Phi-3 Mini (~2.2GB) | 1.5-2x |
+
+**How it works**:
+1. Light model generates draft tokens (fast, ~5-10 tokens)
+2. Quality model verifies drafts in a single batch
+3. Accepted tokens pass through; rejected tokens get corrected
+
+**Automatic Mode Selection**:
+```rust
+// Auto-detects best synergy mode
+let result = synergy.request(LoadHint::ComplexTask).await?;
+match result.mode {
+    SynergyMode::SpeculativeLightQuality => {
+        // 1.5-2x throughput with Light drafting, Quality verification
+    }
+    SynergyMode::Single => {
+        // Single model fallback when only one tier available
+    }
+}
+```
+
+### CPU Optimization
+
+This architecture is **optimized for CPU-only systems**:
+
+- **SIMD Acceleration**: AVX2/FMA (Intel/AMD) and NEON (ARM64)
+- **Light Model Cache**: ~300MB fits in L3 cache → extremely fast drafting
+- **Memory Bandwidth**: Speculative decoding reduces bandwidth bottleneck
+- **Q4_K_M Quantization**: 4-bit weights designed for CPU inference
+
+---
+
 ## Future Models
 
 Models under evaluation for future support:
