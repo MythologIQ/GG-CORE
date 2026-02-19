@@ -137,17 +137,24 @@ fn chaos_model_metadata_empty_file() {
 
 #[test]
 fn chaos_tokenizer_vocab_boundary() {
+    // With fail-fast behavior (Hearthlink v0.6.7), stub tokenizer returns NotLoaded
+    // for all decode operations. Token validation still catches out-of-range tokens
+    // before the NotLoaded check.
     let tw = TokenizerWrapper::new(100, 2, 1);
-    assert!(tw.decode(&[99]).is_ok());
+    // Valid token, but no backend = NotLoaded
+    assert!(tw.decode(&[99]).is_err());
+    // Out of vocab = InvalidToken (checked before NotLoaded)
     assert!(tw.decode(&[100]).is_err());
     assert!(tw.decode(&[u32::MAX]).is_err());
 }
 
 #[test]
 fn chaos_tokenizer_empty_operations() {
+    // With fail-fast behavior (Hearthlink v0.6.7), stub tokenizer returns NotLoaded
+    // even for empty inputs. This ensures production code fails fast without a real model.
     let tw = TokenizerWrapper::new(32000, 2, 1);
-    assert!(tw.encode("").unwrap().is_empty());
-    assert!(tw.decode(&[]).unwrap().is_empty());
+    assert!(tw.encode("").is_err()); // NotLoaded
+    assert!(tw.decode(&[]).is_err()); // NotLoaded
 }
 
 #[test]
