@@ -223,10 +223,21 @@ See [OPTIMIZATION_VERIFICATION.md](docs/build/OPTIMIZATION_VERIFICATION.md) for 
 
 ## Compatible Models
 
+### Recommended (Permissive License)
+
+| Model | Params | Size | License | Use Case |
+|-------|--------|------|---------|----------|
+| **Qwen 2.5 0.5B** | 0.5B | 491 MB | Apache 2.0 | CI/Testing |
+| **Qwen 2.5 1.5B** | 1.5B | 1.1 GB | Apache 2.0 | Default |
+| **Phi-3 Mini** | 3.8B | 2.2 GB | MIT | Production |
+
+See [Recommended Models](docs/RECOMMENDED_MODELS.md) for download instructions.
+
 ### GGUF (Text Generation)
 
 | Model   | Sizes    | Quantization         |
 | ------- | -------- | -------------------- |
+| Qwen 2.5| 0.5B-72B | Q4_K_M, Q5_K_M, Q8_0 |
 | Phi-3   | 3.8B, 7B | Q4_K_M, Q5_K_M, Q8_0 |
 | Llama 3 | 8B, 70B  | Q4_K_M, Q5_K_M, Q8_0 |
 | Mistral | 7B, 8x7B | Q4_K_M, Q5_K_M       |
