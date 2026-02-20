@@ -183,6 +183,42 @@ WasmEdge:            ████████████████     ~80% (
 | Audit logging | ✅ SIEM | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ Basic |
 | No FFI | ❌ llama-cpp | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model encryption | ✅ AES-256 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **FIPS 140-2/3** | ⚠️ Path documented | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **SOC 2 controls** | ⚠️ Mapped | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **HIPAA controls** | ⚠️ Mapped | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### FIPS 140-2/3 Compliance Path
+
+GG-CORE is the **only Rust inference runtime** with documented FIPS compliance path (not certified):
+
+| Requirement | GG-CORE Implementation |
+|-------------|------------------------|
+| **Approved algorithms** | AES-256-GCM, PBKDF2-HMAC-SHA256 |
+| **Key derivation** | PBKDF2 with 100,000 iterations |
+| **Random generation** | OS CSPRNG (getrandom) |
+| **Key storage** | Zeroized on drop, no persistent keys |
+| **Cryptographic boundary** | Process isolation enforces boundary |
+| **Self-tests** | Algorithm validation on startup |
+
+**Compliance path options**:
+1. **Hybrid FIPS** (recommended): Use FIPS-validated OpenSSL module for crypto
+2. **Full FIPS**: Replace RustCrypto with BoringSSL/OpenSSL FIPS module
+3. **FIPS-equivalent**: Current implementation meets algorithm requirements
+
+See [FIPS_ASSESSMENT.md](../security/FIPS_ASSESSMENT.md) and [FIPS_SECURITY_POLICY_DRAFT.md](../security/FIPS_SECURITY_POLICY_DRAFT.md) for details.
+
+### Enterprise Compliance Readiness
+
+> **Note**: GG-CORE provides compliance *readiness* and control mappings, not certifications.
+> Actual certification requires third-party audits.
+
+| Framework | GG-CORE Status | Other Rust Runtimes |
+|-----------|----------------|---------------------|
+| **FIPS 140-2/3** | Path documented, FIPS-approved algorithms | No compliance path |
+| **SOC 2 Type II** | Control mappings documented | No audit controls |
+| **HIPAA** | Technical safeguards mapped, PII detection | No PHI handling |
+| **FedRAMP** | Boundary isolation architecture | No authorization boundary |
+| **PCI DSS** | AES-256 encryption, key derivation | No key management |
 
 ### Pure Rust Security Advantage
 
