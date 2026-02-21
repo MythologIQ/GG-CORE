@@ -107,6 +107,7 @@ fn apply_job_object_limits(config: &SandboxConfig) -> Result<isize, String> {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_JOB_MEMORY,
         JOB_OBJECT_LIMIT_JOB_TIME,
     };
+    use windows_sys::Win32::System::Threading::{AssignProcessToJobObject, GetCurrentProcess};
 
     unsafe {
         // Create a job object
@@ -145,12 +146,23 @@ fn apply_job_object_limits(config: &SandboxConfig) -> Result<isize, String> {
             return Err("Failed to set job object limits".to_string());
         }
 
-        // Note: Assigning the current process to the job object is typically done
-        // at process startup. For a runtime library, we document that the process
-        // should be created with the job object already assigned.
-        //
-        // If we try to assign the current process here, it may fail if the process
-        // is already in a job or if the job has certain restrictions.
+        // Assign the current process to the job object
+        // This is required for the limits to actually apply to this process
+        let current_process = GetCurrentProcess();
+        let assign_result = AssignProcessToJobObject(job, current_process);
+
+        if assign_result == 0 {
+            // Assignment failed - this can happen if:
+            // 1. The process is already in a job object
+            // 2. The job object has incompatible restrictions
+            // We still return success but log a warning, as the job object is created
+            // and could be used for child processes
+            CloseHandle(job);
+            return Err(
+                "Failed to assign current process to job object - process may already be in a job"
+                    .to_string(),
+            );
+        }
 
         Ok(job)
     }

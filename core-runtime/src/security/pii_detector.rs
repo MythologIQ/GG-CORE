@@ -2,9 +2,14 @@
 //! 
 //! Detects and redacts PII in text outputs using pattern matching.
 //! Optimized for performance with SIMD-accelerated regex where available.
+//!
+//! # Security
+//! Uses NFKC normalization before pattern matching to prevent Unicode
+//! homograph attacks where visually similar characters bypass detection.
 
 use regex::Regex;
 use std::sync::Arc;
+use unicode_normalization::UnicodeNormalization;
 
 /// PII types that can be detected
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,11 +167,20 @@ impl PIIDetector {
     
     /// Detect PII in text
     /// Returns list of detected PII instances
+    ///
+    /// # Security
+    /// Uses NFKC normalization to prevent Unicode homograph attacks.
+    /// This ensures that visually similar characters (e.g., Cyrillic 'а' vs Latin 'a')
+    /// are normalized to the same form before pattern matching.
     pub fn detect(&self, text: &str) -> Vec<PIIMatch> {
+        // SECURITY: Apply NFKC normalization to prevent Unicode homograph attacks
+        // This converts visually similar characters to their canonical form
+        let normalized: String = text.nfkc().collect();
+        
         let mut matches = Vec::new();
         
         for (pii_type, regex) in self.patterns.iter() {
-            for m in regex.find_iter(text) {
+            for m in regex.find_iter(&normalized) {
                 let matched_text = m.as_str();
                 
                 // Additional validation for credit cards
@@ -196,9 +210,15 @@ impl PIIDetector {
     }
     
     /// Check if text contains any PII
+    ///
+    /// # Security
+    /// Uses NFKC normalization to prevent Unicode homograph attacks.
     pub fn contains_pii(&self, text: &str) -> bool {
+        // SECURITY: Apply NFKC normalization
+        let normalized: String = text.nfkc().collect();
+        
         for (_, regex) in self.patterns.iter() {
-            if regex.is_match(text) {
+            if regex.is_match(&normalized) {
                 return true;
             }
         }
@@ -207,13 +227,18 @@ impl PIIDetector {
     
     /// Redact PII in text
     /// Returns text with PII replaced by [REDACTED]
+    ///
+    /// # Security
+    /// Uses NFKC normalization to prevent Unicode homograph attacks.
     pub fn redact(&self, text: &str) -> String {
-        let matches = self.detect(text);
+        // SECURITY: Apply NFKC normalization for detection
+        let normalized: String = text.nfkc().collect();
+        let matches = self.detect(&normalized);
         if matches.is_empty() {
             return text.to_string();
         }
         
-        let mut result = text.to_string();
+        let mut result = normalized;
         let mut offset = 0isize;
         
         for m in matches {

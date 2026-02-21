@@ -37,9 +37,9 @@ pub unsafe extern "C" fn core_infer(
     let sess = &*session;
 
     // Validate session
-    let validate_result = rt.tokio.block_on(async {
-        rt.inner.ipc_handler.auth.validate(&sess.token).await
-    });
+    let validate_result = rt
+        .tokio
+        .block_on(async { rt.inner.ipc_handler.auth.validate(&sess.token).await });
     if let Err(e) = validate_result {
         return e.into();
     }
@@ -53,13 +53,29 @@ pub unsafe extern "C" fn core_infer(
         }
     };
 
-    // Copy input tokens
-    let tokens: Vec<u32> =
-        std::slice::from_raw_parts(prompt_tokens, prompt_token_count as usize).to_vec();
+    // SECURITY: Validate token count to prevent memory safety issues
+    // Maximum reasonable token count (1M tokens = ~4MB of u32)
+    const MAX_TOKEN_COUNT: u32 = 1_000_000;
+    if prompt_token_count > MAX_TOKEN_COUNT {
+        set_last_error("prompt_token_count exceeds maximum allowed");
+        return CoreErrorCode::InvalidParams;
+    }
+
+    // Copy input tokens with bounds checking
+    let tokens: Vec<u32> = if prompt_token_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: prompt_token_count is validated above, caller ensures valid pointer
+        unsafe { std::slice::from_raw_parts(prompt_tokens, prompt_token_count as usize).to_vec() }
+    };
 
     // Convert params
     let default_params = CoreInferenceParams::default();
-    let c_params = if params.is_null() { &default_params } else { &*params };
+    let c_params = if params.is_null() {
+        &default_params
+    } else {
+        &*params
+    };
     let rust_params = params_from_c(c_params);
 
     // Run inference
@@ -135,10 +151,7 @@ pub(super) fn params_from_c(c: &CoreInferenceParams) -> InferenceParams {
 }
 
 /// Write inference result to C struct
-fn write_inference_result(
-    result: &crate::engine::InferenceResult,
-    out: &mut CoreInferenceResult,
-) {
+fn write_inference_result(result: &crate::engine::InferenceResult, out: &mut CoreInferenceResult) {
     let mut output = result.output_tokens.clone().into_boxed_slice();
     out.token_count = output.len() as u32;
     out.tokens = output.as_mut_ptr();

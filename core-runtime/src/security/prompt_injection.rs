@@ -2,9 +2,35 @@
 //!
 //! Detects and blocks common prompt injection attack patterns.
 //! Uses SIMD-optimized pattern matching for performance.
+//!
+//! # Security
+//! Strips zero-width characters before pattern matching to prevent
+//! bypass attacks using invisible characters like U+200B, U+200C, U+200D, U+FEFF.
 
 use aho_corasick::AhoCorasick;
 use std::sync::Arc;
+
+/// Zero-width characters that should be stripped before pattern matching.
+/// These can be used to bypass filters by breaking up patterns invisibly.
+const ZERO_WIDTH_CHARS: &[char] = &[
+    '\u{200B}', // Zero-width space
+    '\u{200C}', // Zero-width non-joiner
+    '\u{200D}', // Zero-width joiner
+    '\u{FEFF}', // Byte order mark / Zero-width no-break space
+    '\u{00AD}', // Soft hyphen
+    '\u{2060}', // Word joiner
+    '\u{2061}', // Function application
+    '\u{2062}', // Invisible times
+    '\u{2063}', // Invisible separator
+    '\u{2064}', // Invisible plus
+    '\u{200E}', // Left-to-right mark
+    '\u{200F}', // Right-to-left mark
+    '\u{202A}', // Left-to-right embedding
+    '\u{202B}', // Right-to-left embedding
+    '\u{202C}', // Pop directional formatting
+    '\u{202D}', // Left-to-right override
+    '\u{202E}', // Right-to-left override
+];
 
 /// Prompt injection filter with compiled pattern matcher
 pub struct PromptInjectionFilter {
@@ -119,14 +145,23 @@ impl PromptInjectionFilter {
 
     /// Scan text for prompt injection patterns
     /// Returns (is_safe, risk_score, detected_patterns)
+    ///
+    /// # Security
+    /// Strips zero-width characters before pattern matching to prevent
+    /// bypass attacks using invisible characters.
     pub fn scan(&self, text: &str) -> (bool, u8, Vec<InjectionMatch>) {
+        // SECURITY: Strip zero-width characters before pattern matching
+        // This prevents attackers from bypassing filters by inserting
+        // invisible characters like U+200B between pattern characters
+        let cleaned = strip_zero_width_chars(text);
+
         let mut matches = Vec::new();
         let mut risk_score = 0u8;
 
         // Check high-risk patterns first
-        for m in self.high_risk_matcher.find_iter(text) {
+        for m in self.high_risk_matcher.find_iter(&cleaned) {
             matches.push(InjectionMatch {
-                pattern: text[m.start()..m.end()].to_string(),
+                pattern: cleaned[m.start()..m.end()].to_string(),
                 start: m.start(),
                 end: m.end(),
                 severity: 5,
@@ -135,13 +170,13 @@ impl PromptInjectionFilter {
         }
 
         // Check all patterns
-        for m in self.matcher.find_iter(text) {
+        for m in self.matcher.find_iter(&cleaned) {
             // Skip if already matched as high-risk
             if matches.iter().any(|im| im.start == m.start()) {
                 continue;
             }
 
-            let matched_text = &text[m.start()..m.end()];
+            let matched_text = &cleaned[m.start()..m.end()];
             let severity = Self::classify_severity(matched_text);
 
             matches.push(InjectionMatch {
@@ -164,12 +199,12 @@ impl PromptInjectionFilter {
         ];
 
         for (pattern, context) in context_patterns {
-            if let Some(pos) = text.to_lowercase().find(pattern) {
+            if let Some(pos) = cleaned.to_lowercase().find(pattern) {
                 // Check if context appears nearby
                 let context_window = 50;
                 let start = pos.saturating_sub(context_window);
-                let end = (pos + pattern.len() + context_window).min(text.len());
-                let window = &text[start..end].to_lowercase();
+                let end = (pos + pattern.len() + context_window).min(cleaned.len());
+                let window = &cleaned[start..end].to_lowercase();
 
                 if window.contains(context) {
                     matches.push(InjectionMatch {
@@ -218,15 +253,20 @@ impl PromptInjectionFilter {
 
     /// Sanitize text by removing or escaping injection patterns
     /// Returns sanitized text and whether modifications were made
+    ///
+    /// # Security
+    /// Strips zero-width characters before processing to prevent bypass attacks.
     pub fn sanitize(&self, text: &str) -> (String, bool) {
-        let (is_safe, _, matches) = self.scan(text);
+        // SECURITY: Strip zero-width characters first
+        let cleaned = strip_zero_width_chars(text);
+        let (is_safe, _, matches) = self.scan(&cleaned);
 
         if is_safe && matches.is_empty() {
-            return (text.to_string(), false);
+            return (cleaned, false);
         }
 
         // Remove matched patterns
-        let mut result = text.to_string();
+        let mut result = cleaned;
         let mut offset = 0isize;
 
         for m in &matches {
@@ -241,6 +281,14 @@ impl PromptInjectionFilter {
 
         (result, true)
     }
+}
+
+/// Strip zero-width characters from text.
+/// This prevents bypass attacks using invisible characters.
+fn strip_zero_width_chars(text: &str) -> String {
+    text.chars()
+        .filter(|c| !ZERO_WIDTH_CHARS.contains(c))
+        .collect()
 }
 
 /// Represents a detected injection pattern match
@@ -368,7 +416,11 @@ mod tests {
 
         // Release: 10k scans in <200 ms. Debug: allow 10 s (no optimizations).
         let max_ms: u128 = if cfg!(debug_assertions) { 10_000 } else { 200 };
-        assert!(duration.as_millis() < max_ms, "Scanning too slow: {:?}", duration);
+        assert!(
+            duration.as_millis() < max_ms,
+            "Scanning too slow: {:?}",
+            duration
+        );
     }
 
     #[test]
@@ -386,6 +438,10 @@ mod tests {
 
         // Release: 1k scans in <500 ms. Debug: allow 30 s (no optimizations).
         let max_ms: u128 = if cfg!(debug_assertions) { 30_000 } else { 500 };
-        assert!(duration.as_millis() < max_ms, "Long text scanning too slow: {:?}", duration);
+        assert!(
+            duration.as_millis() < max_ms,
+            "Long text scanning too slow: {:?}",
+            duration
+        );
     }
 }

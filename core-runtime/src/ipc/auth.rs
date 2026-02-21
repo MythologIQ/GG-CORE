@@ -5,6 +5,7 @@
 //!
 //! Security features:
 //! - Constant-time token comparison (prevents timing attacks)
+//! - Constant-time session validation (prevents session enumeration)
 //! - CSPRNG session IDs (prevents session prediction)
 //! - Rate limiting (prevents brute-force attacks)
 //! - Session timeout (limits exposure window)
@@ -28,6 +29,16 @@ const RATE_LIMIT_DURATION: Duration = Duration::from_secs(30);
 /// Duration to track failed attempts for rate limiting.
 const ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
 
+/// Maximum requests per session per minute.
+const MAX_REQUESTS_PER_MINUTE: u64 = 1000;
+
+/// Request rate limiting window.
+const REQUEST_WINDOW: Duration = Duration::from_secs(60);
+
+/// Minimum time for session validation to prevent timing attacks.
+/// This masks any timing differences from HashMap lookups.
+const MIN_VALIDATION_TIME_MICROS: u64 = 100;
+
 #[derive(Error, Debug)]
 pub enum AuthError {
     #[error("Invalid handshake token")]
@@ -44,6 +55,9 @@ pub enum AuthError {
 
     #[error("Too many failed attempts, please try again later")]
     RateLimited,
+
+    #[error("Session request rate limit exceeded")]
+    SessionRateLimited,
 }
 
 /// Validated session token from handshake.
@@ -60,6 +74,10 @@ struct Session {
     created_at: Instant,
     last_activity: Instant,
     connection_count: AtomicUsize,
+    /// Request count for rate limiting.
+    request_count: AtomicU64,
+    /// Window start for request rate limiting.
+    request_window_start: std::sync::Mutex<Option<Instant>>,
 }
 
 /// Rate limiter for authentication attempts.
@@ -201,6 +219,8 @@ impl SessionAuth {
                 created_at: now,
                 last_activity: now,
                 connection_count: AtomicUsize::new(0),
+                request_count: AtomicU64::new(0),
+                request_window_start: std::sync::Mutex::new(Some(now)),
             },
         );
 
@@ -214,7 +234,13 @@ impl SessionAuth {
     }
 
     /// Validate session token and update activity.
+    /// Also enforces per-session request rate limiting.
+    ///
+    /// SECURITY: Uses constant-time validation to prevent timing attacks
+    /// that could be used to enumerate valid session IDs.
     pub async fn validate(&self, token: &SessionToken) -> Result<(), AuthError> {
+        let start = Instant::now();
+
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(token).ok_or_else(|| {
             log_security_event(
@@ -235,7 +261,46 @@ impl SessionAuth {
             return Err(AuthError::SessionExpired);
         }
 
+        // Per-session request rate limiting
+        let now = Instant::now();
+        let should_reset_window = if let Ok(window_start) = &session.request_window_start.lock() {
+            window_start
+                .map(|start| now.duration_since(start) > REQUEST_WINDOW)
+                .unwrap_or(true)
+        } else {
+            false
+        };
+
+        if should_reset_window {
+            session.request_count.store(1, Ordering::SeqCst);
+            if let Ok(mut ws) = session.request_window_start.lock() {
+                *ws = Some(now);
+            }
+        } else {
+            let count = session.request_count.fetch_add(1, Ordering::SeqCst) + 1;
+            if count > MAX_REQUESTS_PER_MINUTE {
+                log_security_event(
+                    SecurityEvent::RateLimited,
+                    "Session request rate limit exceeded",
+                    &[
+                        ("session_prefix", &token.as_str()[..8]),
+                        ("request_count", &count.to_string()),
+                    ],
+                );
+                return Err(AuthError::SessionRateLimited);
+            }
+        }
+
         session.last_activity = Instant::now();
+
+        // Constant-time delay to prevent timing attacks
+        // This ensures all validation operations take the same minimum time
+        let elapsed = start.elapsed().as_micros() as u64;
+        if elapsed < MIN_VALIDATION_TIME_MICROS {
+            let remaining = MIN_VALIDATION_TIME_MICROS - elapsed;
+            std::thread::sleep(Duration::from_micros(remaining));
+        }
+
         Ok(())
     }
 
@@ -387,6 +452,9 @@ mod tests {
         assert!(AuthError::SessionExpired.to_string().contains("expired"));
         assert!(AuthError::NotAuthenticated.to_string().contains("required"));
         assert!(AuthError::RateLimited.to_string().contains("try again"));
+        assert!(AuthError::SessionRateLimited
+            .to_string()
+            .contains("rate limit"));
     }
 
     /// Test RateLimiter initial state

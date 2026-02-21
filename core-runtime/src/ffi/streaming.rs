@@ -46,9 +46,8 @@ impl CallbackInvoker {
             .map(|s| s.as_ptr())
             .unwrap_or(std::ptr::null());
 
-        let should_continue = unsafe {
-            (self.callback)(self.user_data, token, is_final, error_ptr)
-        };
+        let should_continue =
+            unsafe { (self.callback)(self.user_data, token, is_final, error_ptr) };
 
         if !should_continue {
             self.cancelled.store(true, Ordering::SeqCst);
@@ -83,9 +82,9 @@ pub unsafe extern "C" fn core_infer_streaming(
     let sess = &*session;
 
     // Validate session
-    let validate_result = rt.tokio.block_on(async {
-        rt.inner.ipc_handler.auth.validate(&sess.token).await
-    });
+    let validate_result = rt
+        .tokio
+        .block_on(async { rt.inner.ipc_handler.auth.validate(&sess.token).await });
     if let Err(e) = validate_result {
         return e.into();
     }
@@ -98,11 +97,29 @@ pub unsafe extern "C" fn core_infer_streaming(
         }
     };
 
-    let tokens: Vec<u32> =
-        std::slice::from_raw_parts(prompt_tokens, prompt_token_count as usize).to_vec();
+    // SECURITY: Validate token count to prevent memory safety issues
+    // Maximum reasonable token count (1M tokens = ~4MB of u32)
+    const MAX_TOKEN_COUNT: u32 = 1_000_000;
+    if prompt_token_count > MAX_TOKEN_COUNT {
+        set_last_error("prompt_token_count exceeds maximum allowed");
+        return CoreErrorCode::InvalidParams;
+    }
+
+    // SAFETY: We've validated that prompt_token_count is within bounds
+    // and the caller ensures prompt_tokens points to valid memory
+    let tokens: Vec<u32> = if prompt_token_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: prompt_token_count is validated above, caller ensures valid pointer
+        unsafe { std::slice::from_raw_parts(prompt_tokens, prompt_token_count as usize).to_vec() }
+    };
 
     let default_params = CoreInferenceParams::default();
-    let c_params = if params.is_null() { &default_params } else { &*params };
+    let c_params = if params.is_null() {
+        &default_params
+    } else {
+        &*params
+    };
     let rust_params = params_from_c(c_params);
 
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -152,10 +169,7 @@ async fn stream_inference(
     let (_sender, _stream) = TokenStream::new(32);
 
     // Run inference using text-based API with proper model lookup
-    let result = runtime
-        .inference_engine
-        .run(model_id, "", params)
-        .await?;
+    let result = runtime.inference_engine.run(model_id, "", params).await?;
 
     // Send completion callback (streaming would tokenize output)
     invoker.invoke(0, true, None);

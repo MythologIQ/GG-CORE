@@ -7,7 +7,7 @@
 //!
 //! File format with key version:
 //! ```text
-//! [HLGCM][version:2][key_id:4][nonce:12][len:8][ciphertext+tag]
+//! [GGGCM][version:2][key_id:4][nonce:12][len:8][ciphertext+tag]
 //! ```
 
 use super::audit::{audit_logger, AuditCategory, AuditEvent, AuditSeverity};
@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 pub type KeyId = u32;
 
 /// Magic number for versioned encrypted files
-pub const VERSIONED_MAGIC: &[u8; 5] = b"HLGCM";
+pub const VERSIONED_MAGIC: &[u8; 5] = b"GGGCM";
 
 /// Current file format version
 pub const FORMAT_VERSION: u8 = 3;
@@ -207,9 +207,9 @@ impl KeyRotationManager {
 
         // Extract ciphertext length and data
         let len_start = 10 + NONCE_SIZE;
-        let len_bytes: [u8; 8] = data[len_start..len_start + 8].try_into().map_err(|_| {
-            KeyRotationError::InvalidFormat("Invalid length field".into())
-        })?;
+        let len_bytes: [u8; 8] = data[len_start..len_start + 8]
+            .try_into()
+            .map_err(|_| KeyRotationError::InvalidFormat("Invalid length field".into()))?;
         let ct_len = u64::from_le_bytes(len_bytes) as usize;
 
         let ct_start = len_start + 8;
@@ -240,11 +240,7 @@ impl KeyRotationManager {
     }
 
     /// Re-encrypt a file from old key to active key
-    pub async fn migrate_file(
-        &self,
-        input: &Path,
-        output: &Path,
-    ) -> Result<(), KeyRotationError> {
+    pub async fn migrate_file(&self, input: &Path, output: &Path) -> Result<(), KeyRotationError> {
         let data = std::fs::read(input).map_err(|e| KeyRotationError::IoError(e.to_string()))?;
         let plaintext = self.decrypt(&data).await?;
         let encrypted = self.encrypt(&plaintext).await?;

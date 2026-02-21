@@ -90,6 +90,12 @@ aes = "0.8"
 aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 
+# Secure memory zeroing for cryptographic keys
+zeroize = { version = "1.8", features = ["derive"] }
+
+# libc for Unix syscalls (seccomp, etc.)
+libc = "0.2"
+
 # Hostname detection for machine ID
 hostname = "0.4"
 

@@ -7,6 +7,17 @@
 //! - Confidentiality (encryption)
 //! - Integrity (authentication tag)
 //! - Semantic security (identical plaintexts produce different ciphertexts)
+//!
+//! # Key Derivation
+//!
+//! For machine-bound encryption, use [`ModelEncryption::from_machine_id`] which
+//! generates a unique, installation-specific salt rather than a hardcoded value.
+//! This prevents attackers from deriving keys even if they know the machine ID.
+//!
+//! # Key Zeroing
+//!
+//! All key material is securely zeroed when dropped using the `zeroize` crate.
+//! This prevents key recovery from memory dumps or cold boot attacks.
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -14,8 +25,12 @@ use aes_gcm::{
 };
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
+use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Encryption key size (256 bits)
 pub const KEY_SIZE: usize = 32;
@@ -25,6 +40,171 @@ pub const NONCE_SIZE: usize = 12;
 pub const TAG_SIZE: usize = 16;
 /// Block size
 pub const BLOCK_SIZE: usize = 16;
+/// Minimum salt size for security (16 bytes = 128 bits)
+pub const MIN_SALT_SIZE: usize = 16;
+/// Default salt file name
+const SALT_FILE_NAME: &str = ".gg-core-salt";
+/// Maximum nonce history to track for reuse detection
+const MAX_NONCE_HISTORY: usize = 10_000;
+
+/// Global installation salt (generated once, cached)
+static INSTALLATION_SALT: OnceLock<Vec<u8>> = OnceLock::new();
+
+/// Global nonce tracker for reuse detection
+/// Uses a HashSet protected by a Mutex for thread-safe access
+static NONCE_TRACKER: OnceLock<Mutex<HashSet<[u8; NONCE_SIZE]>>> = OnceLock::new();
+
+/// Get or initialize the global nonce tracker
+fn get_nonce_tracker() -> &'static Mutex<HashSet<[u8; NONCE_SIZE]>> {
+    NONCE_TRACKER.get_or_init(|| Mutex::new(HashSet::with_capacity(MAX_NONCE_HISTORY)))
+}
+
+/// Check if a nonce has been used and register it if not.
+/// Returns true if the nonce is new (safe to use), false if it was already used.
+fn check_and_register_nonce(nonce: &[u8; NONCE_SIZE]) -> Result<(), EncryptionError> {
+    let tracker = get_nonce_tracker();
+    let mut tracker_guard = tracker.lock().map_err(|_| {
+        EncryptionError::EncryptionFailed("Nonce tracker lock poisoned".to_string())
+    })?;
+
+    if tracker_guard.contains(nonce) {
+        // CRITICAL: Nonce reuse detected - this should never happen with CSPRNG
+        // If it does, it indicates a serious RNG failure
+        return Err(EncryptionError::NonceReuseDetected);
+    }
+
+    // Add to tracker, evicting oldest if at capacity
+    if tracker_guard.len() >= MAX_NONCE_HISTORY {
+        // Simple eviction: clear half the entries
+        // In production, you might want LRU eviction
+        let to_remove: Vec<[u8; NONCE_SIZE]> = tracker_guard
+            .iter()
+            .take(MAX_NONCE_HISTORY / 2)
+            .copied()
+            .collect();
+        for key in to_remove {
+            tracker_guard.remove(&key);
+        }
+    }
+
+    tracker_guard.insert(*nonce);
+    Ok(())
+}
+
+/// Get or create the installation-specific salt.
+///
+/// The salt is stored in a file within the application's data directory.
+/// If the file doesn't exist, a new cryptographically random salt is generated.
+///
+/// # Security
+/// - Uses CSPRNG (OsRng) for salt generation
+/// - Salt is at least 16 bytes (128 bits) for security
+/// - File is created with restrictive permissions (0600 on Unix)
+/// - Salt is cached in memory to avoid repeated file I/O
+fn get_or_create_installation_salt() -> Result<Vec<u8>, EncryptionError> {
+    // Check if already cached
+    if let Some(salt) = INSTALLATION_SALT.get() {
+        return Ok(salt.clone());
+    }
+
+    let salt_path = get_salt_file_path()?;
+
+    // Try to read existing salt
+    let salt = if salt_path.exists() {
+        let existing = std::fs::read(&salt_path)
+            .map_err(|e| EncryptionError::IoError(format!("Failed to read salt file: {}", e)))?;
+
+        if existing.len() >= MIN_SALT_SIZE {
+            existing
+        } else {
+            // Salt too small, regenerate
+            generate_and_save_salt(&salt_path)?
+        }
+    } else {
+        // Generate new salt
+        generate_and_save_salt(&salt_path)?
+    };
+
+    // Cache the salt (ignore if already set by another thread)
+    let _ = INSTALLATION_SALT.set(salt.clone());
+
+    Ok(salt)
+}
+
+/// Generate a new salt and save it to disk.
+fn generate_and_save_salt(salt_path: &Path) -> Result<Vec<u8>, EncryptionError> {
+    // Generate new salt
+    let salt = generate_random_salt();
+
+    // Ensure parent directory exists
+    if let Some(parent) = salt_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            EncryptionError::IoError(format!("Failed to create salt directory: {}", e))
+        })?;
+    }
+
+    // Write salt with restrictive permissions
+    write_salt_file(salt_path, &salt)?;
+
+    Ok(salt)
+}
+
+/// Get the path to the salt file.
+///
+/// Uses platform-specific application data directories:
+/// - Windows: %LOCALAPPDATA%\gg-core\
+/// - Unix: ~/.config/gg-core/
+fn get_salt_file_path() -> Result<PathBuf, EncryptionError> {
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .map_err(|_| {
+                EncryptionError::IoError("Could not find application data directory".to_string())
+            })?;
+        Ok(PathBuf::from(app_data).join("gg-core").join(SALT_FILE_NAME))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var("HOME")
+            .map_err(|_| EncryptionError::IoError("Could not find home directory".to_string()))?;
+        Ok(PathBuf::from(home)
+            .join(".config")
+            .join("gg-core")
+            .join(SALT_FILE_NAME))
+    }
+}
+
+/// Generate a cryptographically random salt.
+fn generate_random_salt() -> Vec<u8> {
+    use rand::RngCore;
+    let mut salt = vec![0u8; MIN_SALT_SIZE];
+    rand::rngs::OsRng.fill_bytes(&mut salt);
+    salt
+}
+
+/// Write salt file with restrictive permissions.
+#[cfg(target_os = "windows")]
+fn write_salt_file(path: &Path, salt: &[u8]) -> Result<(), EncryptionError> {
+    std::fs::write(path, salt)
+        .map_err(|e| EncryptionError::IoError(format!("Failed to write salt file: {}", e)))
+}
+
+/// Write salt file with restrictive permissions (Unix).
+#[cfg(not(target_os = "windows"))]
+fn write_salt_file(path: &Path, salt: &[u8]) -> Result<(), EncryptionError> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600) // Owner read/write only
+        .open(path)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, salt))
+        .map_err(|e| EncryptionError::IoError(format!("Failed to write salt file: {}", e)))
+}
 
 /// Encryption error types
 #[derive(Debug, Clone)]
@@ -41,6 +221,8 @@ pub enum EncryptionError {
     IoError(String),
     /// Authentication failed
     AuthenticationFailed,
+    /// Nonce reuse detected (critical security failure)
+    NonceReuseDetected,
 }
 
 impl std::fmt::Display for EncryptionError {
@@ -52,6 +234,9 @@ impl std::fmt::Display for EncryptionError {
             EncryptionError::InvalidCiphertext => write!(f, "Invalid ciphertext"),
             EncryptionError::IoError(s) => write!(f, "IO error: {}", s),
             EncryptionError::AuthenticationFailed => write!(f, "Authentication failed"),
+            EncryptionError::NonceReuseDetected => {
+                write!(f, "CRITICAL: Nonce reuse detected - possible RNG failure")
+            }
         }
     }
 }
@@ -59,15 +244,24 @@ impl std::fmt::Display for EncryptionError {
 impl std::error::Error for EncryptionError {}
 
 /// Model encryption handler using AES-256-GCM
+///
+/// # Security
+/// - Keys are automatically zeroed on drop using `zeroize`
+/// - Nonce reuse is detected and prevented
+/// - Uses AES-256-GCM for authenticated encryption
+#[derive(ZeroizeOnDrop)]
 pub struct ModelEncryption {
-    /// Encryption key
-    key: [u8; KEY_SIZE],
+    /// Encryption key (automatically zeroed on drop)
+    #[zeroize(skip)]
+    key: Zeroizing<[u8; KEY_SIZE]>,
     /// Whether hardware acceleration is available
     hw_accelerated: bool,
 }
 
 impl ModelEncryption {
     /// Create a new encryption handler with the given key
+    ///
+    /// The key is wrapped in `Zeroizing` to ensure it is securely erased on drop.
     pub fn new(key: [u8; KEY_SIZE]) -> Self {
         // Check for AES-NI support
         #[cfg(target_arch = "x86_64")]
@@ -76,7 +270,7 @@ impl ModelEncryption {
         let hw_accelerated = false;
 
         Self {
-            key,
+            key: Zeroizing::new(key),
             hw_accelerated,
         }
     }
@@ -98,6 +292,7 @@ impl ModelEncryption {
     /// - Uses PBKDF2 with 100,000 iterations (OWASP recommended minimum)
     /// - Salt should be at least 16 bytes and unique per password
     /// - Password should be high entropy (use a password manager)
+    /// - Derived key is securely zeroed on drop
     pub fn from_password(password: &str, salt: &[u8]) -> Self {
         let mut key = [0u8; KEY_SIZE];
 
@@ -109,11 +304,19 @@ impl ModelEncryption {
             &mut key[..],
         );
 
-        Self::new(key)
+        let result = Self::new(key);
+        // Zero the local key copy (the Zeroizing in Self will handle the other)
+        key.zeroize();
+        result
     }
 
     /// Generate a key from machine-specific identifiers
-    /// This ties encryption to the specific machine
+    /// This ties encryption to the specific machine.
+    ///
+    /// # Security
+    /// Uses a unique, installation-specific salt rather than a hardcoded value.
+    /// This prevents attackers from precomputing keys even if they know the machine ID.
+    /// The salt is stored in the application data directory and generated once per installation.
     #[cfg(target_os = "windows")]
     pub fn from_machine_id() -> Result<Self, EncryptionError> {
         use std::process::Command;
@@ -156,10 +359,18 @@ impl ModelEncryption {
             }
         };
 
-        let salt = b"hearthlink-core-salt";
-        Ok(Self::from_password(&machine_id, salt.as_slice()))
+        // Get or create installation-specific salt
+        let salt = get_or_create_installation_salt()?;
+        Ok(Self::from_password(&machine_id, &salt))
     }
 
+    /// Generate a key from machine-specific identifiers
+    /// This ties encryption to the specific machine.
+    ///
+    /// # Security
+    /// Uses a unique, installation-specific salt rather than a hardcoded value.
+    /// This prevents attackers from precomputing keys even if they know the machine ID.
+    /// The salt is stored in the application data directory and generated once per installation.
     #[cfg(not(target_os = "windows"))]
     pub fn from_machine_id() -> Result<Self, EncryptionError> {
         // On non-Windows, use a combination of hostname and user
@@ -174,21 +385,27 @@ impl ModelEncryption {
             })?;
 
         let combined = format!("{}-{}", hostname, user);
-        let salt = b"hearthlink-core-salt";
-        Ok(Self::from_password(&combined, salt.as_slice()))
+
+        // Get or create installation-specific salt
+        let salt = get_or_create_installation_salt()?;
+        Ok(Self::from_password(&combined, &salt))
     }
 
     /// Encrypt data using AES-256-GCM
     /// Returns (nonce, ciphertext_with_tag)
     ///
     /// The ciphertext includes the authentication tag appended to it.
+    ///
+    /// # Security
+    /// - Nonce reuse is detected and will return an error
+    /// - Uses cryptographically random nonces from OsRng
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), EncryptionError> {
         // Create cipher
         let key = aes_gcm::Key::<Aes256Gcm>::from_slice(self.key.as_slice());
         let cipher = Aes256Gcm::new(key);
 
         // Generate random nonce (required for semantic security)
-        let nonce_bytes = Self::generate_nonce();
+        let nonce_bytes = Self::generate_nonce()?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Encrypt with AES-GCM (includes authentication)
@@ -244,9 +461,9 @@ impl ModelEncryption {
         let mut output_file = std::fs::File::create(output_path)
             .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
-        // Write magic number (updated for GCM format)
+        // Write magic number (GGCM = gg-core GCM format)
         output_file
-            .write_all(b"HLGCM") // Changed from "HLINK" to indicate GCM format
+            .write_all(b"GGGCM")
             .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
         // Write version (version 2 = GCM)
@@ -289,11 +506,14 @@ impl ModelEncryption {
             .read_exact(&mut magic)
             .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
-        // Support both old ECB format ("HLINK") and new GCM format ("HLGCM")
-        let is_gcm = &magic == b"HLGCM";
-        let is_legacy = &magic == b"HLINK";
+        // Support both old formats and new GCM format
+        // Old formats (deprecated): "HLINK" (ECB), "HLGCM" (legacy GCM)
+        // New format: "GGGCM" (gg-core GCM)
+        let is_gcm = &magic == b"GGGCM";
+        let is_legacy_gcm = &magic == b"HLGCM";
+        let is_legacy_ecb = &magic == b"HLINK";
 
-        if !is_gcm && !is_legacy {
+        if !is_gcm && !is_legacy_gcm && !is_legacy_ecb {
             return Err(EncryptionError::InvalidCiphertext);
         }
 
@@ -309,7 +529,7 @@ impl ModelEncryption {
             .read_exact(&mut nonce)
             .map_err(|e| EncryptionError::IoError(e.to_string()))?;
 
-        let plaintext = if is_gcm {
+        let plaintext = if is_gcm || is_legacy_gcm {
             // GCM format: nonce + ciphertext (with embedded tag)
 
             // Read ciphertext length
@@ -369,11 +589,16 @@ impl ModelEncryption {
     }
 
     /// Generate random nonce using cryptographically secure RNG
-    fn generate_nonce() -> Vec<u8> {
+    /// Also registers the nonce to detect reuse.
+    fn generate_nonce() -> Result<Vec<u8>, EncryptionError> {
         use rand::RngCore;
-        let mut nonce = vec![0u8; NONCE_SIZE];
-        rand::rngs::OsRng.fill_bytes(&mut nonce);
-        nonce
+        let mut nonce = [0u8; NONCE_SIZE];
+        rand::rngs::OsRng.fill_bytes(&mut nonce[..]);
+
+        // Check for nonce reuse and register this nonce
+        check_and_register_nonce(&nonce)?;
+
+        Ok(nonce.to_vec())
     }
 
     /// Legacy ECB decryption for migration purposes
@@ -529,7 +754,7 @@ mod tests {
             .read_to_end(&mut encrypted_data)
             .unwrap();
         assert_ne!(test_data.as_slice(), encrypted_data.as_slice());
-        assert!(encrypted_data.starts_with(b"HLGCM")); // GCM format marker
+        assert!(encrypted_data.starts_with(b"GGGCM")); // GCM format marker
 
         // Decrypt
         encryption
@@ -570,7 +795,11 @@ mod tests {
 
         // Release builds: 1 MB must complete in <1 s.
         // Debug builds: allow 30 s (no optimizations).
-        let max_ms: u128 = if cfg!(debug_assertions) { 30_000 } else { 1_000 };
+        let max_ms: u128 = if cfg!(debug_assertions) {
+            30_000
+        } else {
+            1_000
+        };
         assert!(
             encrypt_time.as_millis() < max_ms,
             "Encryption too slow: {:?}",
@@ -704,7 +933,7 @@ mod tests {
         output_file.as_file().read_to_end(&mut encrypted).unwrap();
 
         // Check magic number
-        assert_eq!(&encrypted[0..5], b"HLGCM");
+        assert_eq!(&encrypted[0..5], b"GGGCM");
         // Check version (2.0)
         assert_eq!(encrypted[5], 2);
         assert_eq!(encrypted[6], 0);
@@ -873,7 +1102,7 @@ mod tests {
             .unwrap();
 
         let encrypted = std::fs::read(&output_path).unwrap();
-        assert!(encrypted.starts_with(b"HLGCM"));
+        assert!(encrypted.starts_with(b"GGGCM"));
     }
 
     #[test]
@@ -886,7 +1115,7 @@ mod tests {
         // Write a truncated encrypted file (magic + version + partial nonce)
         input_file
             .as_file()
-            .write_all(b"HLGCM\x02\x00\x01\x02\x03")
+            .write_all(b"GGGCM\x02\x00\x01\x02\x03")
             .unwrap();
 
         let result = encryption.decrypt_file(input_file.path(), output_file.path());
@@ -901,7 +1130,7 @@ mod tests {
         let output_file = NamedTempFile::new().unwrap();
 
         // Write GCM magic but with version 99
-        input_file.as_file().write_all(b"HLGCM\x63\x00").unwrap();
+        input_file.as_file().write_all(b"GGGCM\x63\x00").unwrap();
 
         // Should still attempt to decrypt (version is read but not validated strictly)
         // The error will come from missing data
@@ -989,5 +1218,42 @@ mod tests {
 
         let result = encryption.decrypt(&nonce, &ciphertext);
         assert!(result.is_err());
+    }
+
+    // === Nonce reuse detection tests ===
+
+    #[test]
+    fn test_nonce_reuse_detection() {
+        // Test that manually registering the same nonce twice fails
+        let nonce: [u8; NONCE_SIZE] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+        // First registration should succeed
+        let result1 = check_and_register_nonce(&nonce);
+        assert!(result1.is_ok());
+
+        // Second registration of the same nonce should fail
+        let result2 = check_and_register_nonce(&nonce);
+        assert!(matches!(result2, Err(EncryptionError::NonceReuseDetected)));
+    }
+
+    #[test]
+    fn test_nonce_reuse_error_display() {
+        let err = EncryptionError::NonceReuseDetected;
+        let msg = err.to_string();
+        assert!(msg.contains("CRITICAL"));
+        assert!(msg.contains("Nonce reuse"));
+    }
+
+    #[test]
+    fn test_different_nonces_allowed() {
+        // Test that different nonces are allowed
+        let nonce1: [u8; NONCE_SIZE] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let nonce2: [u8; NONCE_SIZE] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+
+        let result1 = check_and_register_nonce(&nonce1);
+        assert!(result1.is_ok());
+
+        let result2 = check_and_register_nonce(&nonce2);
+        assert!(result2.is_ok());
     }
 }

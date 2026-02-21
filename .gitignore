@@ -21,3 +21,32 @@ tools/llvm16/
 
 # Model files (download separately)
 core-runtime/fixtures/models/
+
+# TierSynergy - proprietary component
+core-runtime/src/models/tier_synergy.rs
+
+# =============================================================================
+# PROPRIETARY - Enterprise GPU/Performance Optimizations
+# These files contain competitive IP and should NOT be pushed to public repos
+# =============================================================================
+
+# GPU kernel optimizations (HIGH VALUE IP)
+core-runtime/src/engine/cuda.rs
+core-runtime/src/engine/metal.rs
+core-runtime/src/engine/multi_gpu.rs
+core-runtime/src/engine/flash_attn_gpu.rs
+
+# Inference optimizations (HIGH VALUE IP)
+core-runtime/src/engine/speculative_v2.rs
+core-runtime/src/engine/speculative.rs
+
+# SIMD optimizations (MEDIUM VALUE IP)
+core-runtime/src/engine/simd_tokenizer_v2.rs
+core-runtime/src/engine/simd_matmul.rs
+core-runtime/src/engine/simd_neon.rs
+
+# Quantization algorithms (MEDIUM VALUE IP)
+core-runtime/src/engine/quantize.rs
+
+# Benchmark comparisons (reveals performance advantages)
+core-runtime/benches/llama_cpp_comparison.rs
