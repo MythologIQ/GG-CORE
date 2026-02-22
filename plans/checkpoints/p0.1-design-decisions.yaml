@@ -1,0 +1,64 @@
+---
+# P0.1 Design Decisions - Queue-Execution Wiring
+# Decided: 2026-02-22
+# Based on: Devil's advocate analysis of scheduler, warmup, cancellation
+
+scheduler_loop:
+  approach: "simple_dequeue_execute"
+  rejected: "ContinuousBatcher"
+  rejection_reasons:
+    - "Requires per-token control of generation loop (backend exposes tight loop, not single-step API)"
+    - "Requires tokenized input at enqueue time (tokenizer needs loaded model)"
+    - "Requires shared KV cache (current backend creates new context per call)"
+  future: "ContinuousBatcher is P2/P3 scope after backend rewrite"
+
+worker_model:
+  count: 1
+  rationale: "CPU inference internally multi-threaded (auto-detect, cap 16). Multiple workers = thread oversubscription + cache thrashing"
+  gpu_note: "P2 may increase to >1 worker"
+  implementation: "tokio::spawn + spawn_blocking (matches streaming path pattern)"
+  new_file: "scheduler/worker.rs (<100 lines)"
+
+response_delivery:
+  mechanism: "tokio::sync::oneshot::channel"
+  flow: "handler enqueues with oneshot::Sender -> awaits Receiver -> worker sends result back"
+  new_field: "QueuedRequest.response_tx: oneshot::Sender<Result<InferenceResult, InferenceError>>"
+
+warmup:
+  behavior: "short_inference_through_queue"
+  prompt: "Hello (default, configurable)"
+  max_tokens: 1
+  priority: "Priority::Low or Priority::Warmup"
+  validates: "full pipeline - context creation, prompt processing, one decode step, cleanup"
+  returns: "actual inference latency (not enqueue latency)"
+  edge_case: "fail if model not loaded - do NOT auto-load"
+  metrics: "tag warmup separately, do not count in production metrics"
+
+cancellation:
+  strategy: "cooperative"
+  mechanism: "is_cancelled: &dyn Fn() -> bool passed to sample_loop()"
+  rationale: "preemptive abort doesn't work on spawn_blocking tasks - OS thread continues"
+  latency_bounds:
+    "0.5B_model": "<= 25ms per token (well within 250ms KPI)"
+    "7B_cpu": "<= 250ms per token (at KPI boundary)"
+    "7B_gpu_p2": "<= 5ms per token"
+  new_variant: "FinishReason::Cancelled"
+  backend_agnostic: "closure wraps AtomicBool or CancellationToken, keeps backend runtime-agnostic"
+  streaming_benefit: "improves streaming cancellation too (currently relies on sender.send() failure)"
+
+files_to_modify:
+  - "scheduler/queue.rs: add oneshot::Sender to QueuedRequest"
+  - "ipc/handler.rs: replace direct inference with enqueue + await oneshot; fix warmup"
+  - "engine/inference.rs: add cancellation parameter to run()"
+  - "engine/gguf/backend.rs: add is_cancelled to sample_loop() and generate_stream()"
+  - "engine/gguf/generator.rs: thread cancellation through generate_text()"
+  - "engine/mod.rs: add FinishReason::Cancelled"
+
+files_to_create:
+  - "scheduler/worker.rs: dequeue-execute worker loop"
+
+files_explicitly_not_modified:
+  - "scheduler/continuous.rs: P2/P3 scope"
+  - "scheduler/batch.rs: not needed for single-request P0"
+  - "scheduler/thread_pool.rs: P0 uses single tokio worker"
+  - "engine/prefill.rs: P3 scope"

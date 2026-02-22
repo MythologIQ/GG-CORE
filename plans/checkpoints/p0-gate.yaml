@@ -1,0 +1,97 @@
+---
+# GG-CORE P0 Gate Checkpoint - Correctness Recovery
+# Phase: P0 - Fix what's broken before building new
+
+checkpoint:
+  phase: "P0"
+  workstream: "correctness-recovery"
+  timestamp: "2026-02-22T00:00:00Z"
+  git_sha: "pending-commit"
+  git_tag: "p0-complete"
+  branch: "remediation/p0"
+
+workstreams_completed:
+  p0.1_queue_execution:
+    description: "Wire queue as single execution arbiter"
+    changes:
+      - "scheduler/worker.rs: NEW - dequeue-execute loop with lifecycle/registry stats"
+      - "scheduler/queue.rs: oneshot channels, tier-1 context check, Notify-based waking"
+      - "ipc/handler.rs: enqueue_with_response() replaces direct inference calls"
+      - "engine/inference.rs: run_cancellable() with AtomicBool, O(1) handle lookup"
+      - "engine/gguf/backend.rs: generate_cancellable() with per-token is_cancelled"
+      - "engine/gguf/generator.rs: generate_text_cancellable() threading"
+      - "engine/output.rs: FinishReason::Cancelled variant"
+      - "main.rs: spawn_worker_with_registry() at startup"
+    tests_added:
+      - "scheduler/worker_tests.rs: 5 tests (execute, cancel skip, concurrent, shutdown, full queue)"
+
+  p0.2_model_lifecycle:
+    description: "Unify model lifecycle - single load/register path"
+    changes:
+      - "models/lifecycle.rs: NEW - ModelLifecycle coordinator"
+      - "models/lifecycle_tests.rs: NEW - 9 tests including TOCTOU race prevention"
+      - "lib.rs: Runtime.model_lifecycle field"
+    design_decisions:
+      - "Coordinator pattern (not merge) preserves separation of concerns"
+      - "Bidirectional O(1) lookup (id↔handle) via LookupIndex"
+      - "Write lock held for entire load/unload to prevent TOCTOU"
+
+  p0.3_api_repair:
+    description: "Repair FFI and Python API surface"
+    changes:
+      - "ffi/models.rs: ModelLifecycle integration for load/unload"
+      - "ffi/inference.rs: text-based API v1 (no compat wrapper)"
+      - "ffi/streaming.rs: updated for new engine interface"
+      - "ffi/types.rs: text-based types"
+      - "python/session.rs: lifecycle-routed load/unload"
+      - "python/inference.rs: text-based infer(model_id, prompt)"
+
+gate_results:
+  all_tests_pass: true
+  test_count: 463
+  test_failures: 0
+  benchmark_run: false  # No performance regression baseline yet
+
+security:
+  sandbox_integrity: true
+  no_forbidden_deps: true
+  no_forbidden_modules: true
+  no_network_access: true
+  ipc_only: true
+  ffi_python_in_process_only: true
+
+quality:
+  section4_compliance:
+    new_files_compliant: true
+    new_violations: 1  # queue.rs 264 lines (14 over)
+    pre_existing_violations: 4  # inference.rs, backend.rs, handler.rs, main.rs
+    deferred_to: "P1"
+
+design_decisions_log:
+  - "p0-design-decisions.yaml: coordinator pattern, two-tier context, cancellation"
+  - "p0.1-design-decisions.yaml: simple dequeue-execute, single worker, oneshot, warmup"
+
+adversarial_recommendations_incorporated:
+  - "DO NOT merge registries → coordinator pattern"
+  - "Two-tier context check (heuristic + precise)"
+  - "Cooperative cancellation with per-token check"
+  - "No FFI compat wrapper (clean break)"
+  - "run_cancellable() parallel method (no trait churn)"
+
+observer_reviews:
+  p0.2: "APPROVED - TOCTOU fix verified"
+  p0.1_interim: "APPROVED WITH ISSUES - worker startup + stats (fixed by team-lead)"
+  p0.1_final: "pending"
+  p0.3: "pending"
+
+devils_advocate_reviews:
+  design_challenge: "6 assumptions challenged, all incorporated"
+  integration_gaps: "3 found (unload TOCTOU fixed, cancellation gap noted, read lock deferred)"
+  cross_workstream: "pending"
+
+notes: |
+  P0 achieves correctness recovery: the queue is the sole execution arbiter,
+  model lifecycle is atomic, and the API surface uses text-based interfaces
+  routed through ModelLifecycle. Cancellation is cooperative with per-token
+  checking in the GGUF backend. Two-tier context check prevents oversized
+  prompts at both enqueue (heuristic) and execution (precise) time.

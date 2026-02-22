@@ -3,9 +3,9 @@
 
 //! Kubernetes integration types.
 //!
-//! Defines Rust types matching the GgRuntime and GgModel CRDs.
+//! Defines Rust types matching the GgCoreRuntime and GgCoreModel CRDs.
 
 pub mod types;
 
 // K8s CRD types - names match the actual CRD kind for compatibility
-pub use types::{VeritasModel, VeritasModelSpec, VeritasRuntime, VeritasRuntimeSpec};
+pub use types::{GgCoreModel, GgCoreModelSpec, GgCoreRuntime, GgCoreRuntimeSpec};

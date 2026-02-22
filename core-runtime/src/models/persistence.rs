@@ -182,7 +182,7 @@ mod tests {
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("veritas_test_{}", name))
+        std::env::temp_dir().join(format!("gg_core_test_{}", name))
     }
 
     #[test]

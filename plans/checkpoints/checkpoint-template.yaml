@@ -1,0 +1,35 @@
+---
+# GG-CORE Remediation Checkpoint Template
+# Copy and fill for each phase gate
+
+checkpoint:
+  phase: ""           # P0, P1, P2, P3
+  workstream: ""      # e.g., "0.1-queue-execution"
+  timestamp: ""       # ISO 8601
+  git_sha: ""
+  git_tag: ""
+  branch: ""
+
+scope:
+  files_changed: []
+  tests_added: []
+  tests_modified: []
+
+gate_results:
+  all_tests_pass: false
+  benchmark_run: false
+  kpi_gates: {}       # key: metric name, value: {threshold, actual, pass}
+
+security:
+  sandbox_integrity: true
+  no_forbidden_deps: true
+  no_forbidden_modules: true
+  no_network_access: true
+
+quality:
+  max_function_lines: 40
+  max_file_lines: 250
+  max_nesting: 3
+  section4_violations: 0
+
+notes: ""

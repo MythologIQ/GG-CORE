@@ -227,10 +227,10 @@ fn validate_socket_path(socket_path: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// VeritasRuntime CRD spec.
+/// GgCoreRuntime CRD spec.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasRuntimeSpec {
+pub struct GgCoreRuntimeSpec {
     /// Number of replicas.
     pub replicas: u32,
     /// Container image.
@@ -247,7 +247,7 @@ pub struct VeritasRuntimeSpec {
     pub socket_path: Option<String>,
 }
 
-impl VeritasRuntimeSpec {
+impl GgCoreRuntimeSpec {
     /// Validate all fields in the spec
     ///
     /// # Errors
@@ -285,31 +285,31 @@ pub struct GpuSpec {
     pub resource_type: String,
 }
 
-/// VeritasRuntime CRD.
+/// GgCoreRuntime CRD.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasRuntime {
+pub struct GgCoreRuntime {
     pub api_version: String,
     pub kind: String,
     pub metadata: CrdMetadata,
-    pub spec: VeritasRuntimeSpec,
+    pub spec: GgCoreRuntimeSpec,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<VeritasRuntimeStatus>,
+    pub status: Option<GgCoreRuntimeStatus>,
 }
 
 /// Runtime status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasRuntimeStatus {
+pub struct GgCoreRuntimeStatus {
     pub ready_replicas: u32,
     pub phase: String,
     pub conditions: Vec<Condition>,
 }
 
-/// VeritasModel CRD spec.
+/// GgCoreModel CRD spec.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasModelSpec {
+pub struct GgCoreModelSpec {
     /// Model identifier.
     pub model_id: String,
     /// Model version.
@@ -322,7 +322,7 @@ pub struct VeritasModelSpec {
     pub auto_load: bool,
 }
 
-impl VeritasModelSpec {
+impl GgCoreModelSpec {
     /// Validate all fields in the spec
     ///
     /// # Errors
@@ -387,22 +387,22 @@ impl ModelSource {
     }
 }
 
-/// VeritasModel CRD.
+/// GgCoreModel CRD.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasModel {
+pub struct GgCoreModel {
     pub api_version: String,
     pub kind: String,
     pub metadata: CrdMetadata,
-    pub spec: VeritasModelSpec,
+    pub spec: GgCoreModelSpec,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<VeritasModelStatus>,
+    pub status: Option<GgCoreModelStatus>,
 }
 
 /// Model status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VeritasModelStatus {
+pub struct GgCoreModelStatus {
     pub loaded: bool,
     pub phase: String,
     pub conditions: Vec<Condition>,
@@ -434,15 +434,15 @@ mod tests {
 
     #[test]
     fn test_serialize_runtime() {
-        let runtime = VeritasRuntime {
-            api_version: "veritas.io/v1".to_string(),
-            kind: "VeritasRuntime".to_string(),
+        let runtime = GgCoreRuntime {
+            api_version: "gg-core.io/v1".to_string(),
+            kind: "GgCoreRuntime".to_string(),
             metadata: CrdMetadata {
-                name: "veritas-prod".to_string(),
+                name: "gg-core-prod".to_string(),
                 namespace: Some("default".to_string()),
                 labels: None,
             },
-            spec: VeritasRuntimeSpec {
+            spec: GgCoreRuntimeSpec {
                 replicas: 3,
                 image: "gg-core:0.5.0".to_string(),
                 memory: "4Gi".to_string(),
@@ -455,15 +455,15 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&runtime).unwrap();
-        assert!(json.contains("veritas.io/v1"));
-        assert!(json.contains("VeritasRuntime"));
+        assert!(json.contains("gg-core.io/v1"));
+        assert!(json.contains("GgCoreRuntime"));
     }
 
     // --- Additional tests ---
 
     #[test]
     fn test_runtime_spec_with_gpu() {
-        let spec = VeritasRuntimeSpec {
+        let spec = GgCoreRuntimeSpec {
             replicas: 2,
             image: "gg-core:0.5.0".to_string(),
             memory: "8Gi".to_string(),
@@ -473,7 +473,7 @@ mod tests {
                 resource_type: "nvidia.com/gpu".to_string(),
             }),
             model_pvc: "models-pvc".to_string(),
-            socket_path: Some("/var/run/veritas.sock".to_string()),
+            socket_path: Some("/var/run/gg-core.sock".to_string()),
         };
 
         let json = serde_json::to_string(&spec).unwrap();
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_runtime_status_serialization() {
-        let status = VeritasRuntimeStatus {
+        let status = GgCoreRuntimeStatus {
             ready_replicas: 3,
             phase: "Running".to_string(),
             conditions: vec![Condition {
@@ -509,7 +509,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&status).unwrap();
-        let deserialized: VeritasRuntimeStatus = serde_json::from_str(&json).unwrap();
+        let deserialized: GgCoreRuntimeStatus = serde_json::from_str(&json).unwrap();
 
         assert_eq!(status.ready_replicas, deserialized.ready_replicas);
         assert_eq!(status.phase, deserialized.phase);
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_model_spec_serialization() {
-        let spec = VeritasModelSpec {
+        let spec = GgCoreModelSpec {
             model_id: "llama-7b".to_string(),
             version: "1.0.0".to_string(),
             source: ModelSource {
@@ -530,7 +530,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&spec).unwrap();
-        let deserialized: VeritasModelSpec = serde_json::from_str(&json).unwrap();
+        let deserialized: GgCoreModelSpec = serde_json::from_str(&json).unwrap();
 
         assert_eq!(spec.model_id, deserialized.model_id);
         assert_eq!(spec.version, deserialized.version);
@@ -553,20 +553,20 @@ mod tests {
     }
 
     #[test]
-    fn test_veritas_model_full() {
-        let model = VeritasModel {
-            api_version: "veritas.io/v1".to_string(),
-            kind: "VeritasModel".to_string(),
+    fn test_gg_core_model_full() {
+        let model = GgCoreModel {
+            api_version: "gg-core.io/v1".to_string(),
+            kind: "GgCoreModel".to_string(),
             metadata: CrdMetadata {
                 name: "llama-model".to_string(),
                 namespace: Some("ml-models".to_string()),
                 labels: Some({
                     let mut map = std::collections::HashMap::new();
-                    map.insert("app".to_string(), "veritas".to_string());
+                    map.insert("app".to_string(), "gg-core".to_string());
                     map
                 }),
             },
-            spec: VeritasModelSpec {
+            spec: GgCoreModelSpec {
                 model_id: "llama-7b".to_string(),
                 version: "1.0.0".to_string(),
                 source: ModelSource {
@@ -576,7 +576,7 @@ mod tests {
                 variant: None,
                 auto_load: false,
             },
-            status: Some(VeritasModelStatus {
+            status: Some(GgCoreModelStatus {
                 loaded: true,
                 phase: "Loaded".to_string(),
                 conditions: vec![],
@@ -584,14 +584,14 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&model).unwrap();
-        assert!(json.contains("VeritasModel"));
+        assert!(json.contains("GgCoreModel"));
         assert!(json.contains("llama-7b"));
         assert!(json.contains("ml-models"));
     }
 
     #[test]
     fn test_model_status_serialization() {
-        let status = VeritasModelStatus {
+        let status = GgCoreModelStatus {
             loaded: false,
             phase: "Loading".to_string(),
             conditions: vec![Condition {
@@ -603,7 +603,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&status).unwrap();
-        let deserialized: VeritasModelStatus = serde_json::from_str(&json).unwrap();
+        let deserialized: GgCoreModelStatus = serde_json::from_str(&json).unwrap();
 
         assert_eq!(status.loaded, deserialized.loaded);
         assert_eq!(status.phase, deserialized.phase);
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn test_camel_case_serialization() {
-        let spec = VeritasRuntimeSpec {
+        let spec = GgCoreRuntimeSpec {
             replicas: 1,
             image: "test:latest".to_string(),
             memory: "1Gi".to_string(),
@@ -700,22 +700,22 @@ mod tests {
     #[test]
     fn test_runtime_deserialization() {
         let json = r#"{
-            "apiVersion": "veritas.io/v1",
-            "kind": "VeritasRuntime",
+            "apiVersion": "gg-core.io/v1",
+            "kind": "GgCoreRuntime",
             "metadata": {
                 "name": "test-runtime",
                 "namespace": "default"
             },
             "spec": {
                 "replicas": 2,
-                "image": "veritas:latest",
+                "image": "gg-core:latest",
                 "memory": "2Gi",
                 "cpu": "1",
                 "modelPvc": "models"
             }
         }"#;
 
-        let runtime: VeritasRuntime = serde_json::from_str(json).unwrap();
+        let runtime: GgCoreRuntime = serde_json::from_str(json).unwrap();
         assert_eq!(runtime.metadata.name, "test-runtime");
         assert_eq!(runtime.spec.replicas, 2);
         assert_eq!(runtime.spec.model_pvc, "models");
@@ -724,8 +724,8 @@ mod tests {
     #[test]
     fn test_model_deserialization() {
         let json = r#"{
-            "apiVersion": "veritas.io/v1",
-            "kind": "VeritasModel",
+            "apiVersion": "gg-core.io/v1",
+            "kind": "GgCoreModel",
             "metadata": {
                 "name": "test-model"
             },
@@ -740,22 +740,22 @@ mod tests {
             }
         }"#;
 
-        let model: VeritasModel = serde_json::from_str(json).unwrap();
+        let model: GgCoreModel = serde_json::from_str(json).unwrap();
         assert_eq!(model.spec.model_id, "test");
         assert!(model.spec.auto_load);
     }
 
     #[test]
     fn test_skip_serializing_none_status() {
-        let runtime = VeritasRuntime {
-            api_version: "veritas.io/v1".to_string(),
-            kind: "VeritasRuntime".to_string(),
+        let runtime = GgCoreRuntime {
+            api_version: "gg-core.io/v1".to_string(),
+            kind: "GgCoreRuntime".to_string(),
             metadata: CrdMetadata {
                 name: "test".to_string(),
                 namespace: None,
                 labels: None,
             },
-            spec: VeritasRuntimeSpec {
+            spec: GgCoreRuntimeSpec {
                 replicas: 1,
                 image: "test".to_string(),
                 memory: "1Gi".to_string(),
@@ -774,15 +774,15 @@ mod tests {
 
     #[test]
     fn test_clone_traits() {
-        let runtime = VeritasRuntime {
-            api_version: "veritas.io/v1".to_string(),
-            kind: "VeritasRuntime".to_string(),
+        let runtime = GgCoreRuntime {
+            api_version: "gg-core.io/v1".to_string(),
+            kind: "GgCoreRuntime".to_string(),
             metadata: CrdMetadata {
                 name: "test".to_string(),
                 namespace: None,
                 labels: None,
             },
-            spec: VeritasRuntimeSpec {
+            spec: GgCoreRuntimeSpec {
                 replicas: 1,
                 image: "test".to_string(),
                 memory: "1Gi".to_string(),
@@ -856,15 +856,15 @@ mod tests {
     fn test_validate_image_injection() {
         // Shell metacharacters should be rejected
         assert!(matches!(
-            validate_image("veritas; rm -rf /"),
+            validate_image("gg-core; rm -rf /"),
             Err(ValidationError::InvalidImage(_))
         ));
         assert!(matches!(
-            validate_image("veritas && cat /etc/passwd"),
+            validate_image("gg-core && cat /etc/passwd"),
             Err(ValidationError::InvalidImage(_))
         ));
         assert!(matches!(
-            validate_image("veritas`whoami`"),
+            validate_image("gg-core`whoami`"),
             Err(ValidationError::InvalidImage(_))
         ));
         assert!(matches!(
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn test_validate_socket_path_valid() {
-        assert!(validate_socket_path("/var/run/veritas.sock").is_ok());
+        assert!(validate_socket_path("/var/run/gg-core.sock").is_ok());
         assert!(validate_socket_path("/tmp/socket").is_ok());
     }
 
@@ -917,7 +917,7 @@ mod tests {
     fn test_validate_socket_path_invalid() {
         // Relative path
         assert!(matches!(
-            validate_socket_path("var/run/veritas.sock"),
+            validate_socket_path("var/run/gg-core.sock"),
             Err(ValidationError::InvalidSocketPath(_))
         ));
         // Path traversal
@@ -927,27 +927,27 @@ mod tests {
         ));
         // Null byte
         assert!(matches!(
-            validate_socket_path("/var/run\0/veritas.sock"),
+            validate_socket_path("/var/run\0/gg-core.sock"),
             Err(ValidationError::InvalidSocketPath(_))
         ));
     }
 
     #[test]
     fn test_runtime_spec_validate() {
-        let valid_spec = VeritasRuntimeSpec {
+        let valid_spec = GgCoreRuntimeSpec {
             replicas: 2,
             image: "gg-core:0.5.0".to_string(),
             memory: "4Gi".to_string(),
             cpu: "2".to_string(),
             gpu: None,
             model_pvc: "models-pvc".to_string(),
-            socket_path: Some("/var/run/veritas.sock".to_string()),
+            socket_path: Some("/var/run/gg-core.sock".to_string()),
         };
         assert!(valid_spec.validate().is_ok());
 
-        let invalid_image = VeritasRuntimeSpec {
+        let invalid_image = GgCoreRuntimeSpec {
             replicas: 2,
-            image: "veritas; rm -rf /".to_string(),
+            image: "gg-core; rm -rf /".to_string(),
             memory: "4Gi".to_string(),
             cpu: "2".to_string(),
             gpu: None,
@@ -959,7 +959,7 @@ mod tests {
 
     #[test]
     fn test_model_spec_validate() {
-        let valid_spec = VeritasModelSpec {
+        let valid_spec = GgCoreModelSpec {
             model_id: "llama-7b".to_string(),
             version: "1.0.0".to_string(),
             source: ModelSource {
@@ -971,7 +971,7 @@ mod tests {
         };
         assert!(valid_spec.validate().is_ok());
 
-        let invalid_model_id = VeritasModelSpec {
+        let invalid_model_id = GgCoreModelSpec {
             model_id: "llama/../../../etc/passwd".to_string(),
             version: "1.0.0".to_string(),
             source: ModelSource {

@@ -1,0 +1,46 @@
+---
+# P0 Design Decisions - Scalability Remediation
+# Decided: 2026-02-22
+# Based on: Observer audit + Devil's advocate analysis
+
+decisions:
+  model_lifecycle:
+    approach: "coordinator_pattern"
+    rationale: "Separation of concerns between ModelRegistry (diagnostics) and InferenceEngine (execution) is intentional. ModelLifecycle coordinator synchronizes both atomically."
+    rejected: "merge_registries - would couple diagnostics with hot-path inference locking"
+
+  queue_execution:
+    approach: "queue_as_sole_arbiter"
+    latency_impact: "~0.1-0.8% overhead (10-50us vs 6ms/token) - negligible"
+    warmup: "must_define_semantics - current warmup is no-op enqueue"
+
+  context_checks:
+    approach: "two_tier"
+    tier1: "byte-length heuristic at queue admission (4 bytes/token conservative ratio)"
+    tier2: "precise token count post-dequeue using model tokenizer"
+    rationale: "tokenizer requires loaded model, unavailable at admission time"
+
+  cancellation:
+    approach: "in_flight_cancellation_priority"
+    atomic_ordering: "deprioritized - TSO makes Relaxed equivalent to Acquire/Release on x86"
+    real_gap: "non-streaming path has no cancellation during execution"
+    fix: "add cooperative or preemptive cancellation matching streaming path"
+
+  handle_lookup:
+    approach: "incidental_fix"
+    rationale: "O(n) on 3-5 items is ~10-50ns, not a scalability issue"
+    action: "add model_id_to_handle HashMap during P0.2 if convenient"
+
+  ffi_compatibility:
+    approach: "no_wrapper"
+    rationale: "zero external consumers exist - ship corrected API as v1"
+    action: "fix APIs to work with ModelLifecycle, no deprecation layer"
+
+observer_findings_incorporated:
+  - "N2: FFI core_model_list stub - added to P0.3 scope"
+  - "N3: warmup no-op - added to P0.1 scope"
+
+section4_violations_found: 6
+  # main.rs (591 lines), protocol.rs (565), gpu.rs (482),
+  # multi_gpu.rs (480), smart_loader.rs (548), handler.rs (427)
+  # Fix as files are touched, not as separate cleanup
