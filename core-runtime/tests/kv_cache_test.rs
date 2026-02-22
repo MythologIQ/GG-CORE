@@ -21,6 +21,7 @@ fn test_config() -> KvCacheConfig {
         enable_quantization: true,
         enable_paged: true,
         eviction_policy: EvictionPolicy::Lru,
+        sliding_window: None,
     }
 }
 
