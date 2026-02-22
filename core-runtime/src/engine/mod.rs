@@ -11,6 +11,8 @@ pub mod flash_attn;
 pub mod flash_attn_gpu;
 pub mod gguf;
 pub mod gpu;
+pub mod gpu_manager;
+pub mod gpu_pool;
 pub mod input;
 pub mod onnx;
 pub mod output;
@@ -30,8 +32,10 @@ pub mod cuda;
 pub mod metal;
 pub mod moe;
 pub mod multi_gpu;
+pub mod multi_gpu_partition;
 
 pub mod inference;
+pub mod inference_types;
 mod streaming;
 mod tokenizer;
 
@@ -67,7 +71,9 @@ pub use tokenizer::{TokenizerError, TokenizerWrapper};
 pub use gguf::{GgufConfig, GgufGenerator, GgufModel};
 #[cfg(feature = "gguf")]
 pub use gguf::LlamaBackendInner;
-pub use gpu::{GpuBackend, GpuConfig, GpuDevice, GpuError, GpuManager, GpuMemory, GpuMemoryPool};
+pub use gpu::{GpuBackend, GpuConfig, GpuDevice, GpuError, GpuMemory};
+pub use gpu_manager::GpuManager;
+pub use gpu_pool::GpuMemoryPool;
 pub use onnx::{OnnxClassifier, OnnxConfig, OnnxEmbedder, OnnxModel};
 
 // CUDA backend re-exports
@@ -84,10 +90,8 @@ pub use metal::{
 };
 
 // Multi-GPU support
-pub use multi_gpu::{
-    CrossGpuCommunication, GpuPartition, MultiGpuConfig, MultiGpuError, MultiGpuManager,
-    MultiGpuStrategy,
-};
+pub use multi_gpu::{GpuPartition, MultiGpuConfig, MultiGpuError, MultiGpuManager, MultiGpuStrategy};
+pub use multi_gpu_partition::CrossGpuCommunication;
 
 // Mixture of Experts support
 pub use moe::{

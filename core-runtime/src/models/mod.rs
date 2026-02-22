@@ -5,6 +5,8 @@
 pub mod manifest;
 pub mod pool;
 pub mod smart_loader;
+mod smart_loader_ops;
+pub mod smart_loader_types;
 pub mod tier_synergy;
 
 mod drain;
