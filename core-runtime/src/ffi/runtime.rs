@@ -26,12 +26,15 @@ pub extern "C" fn core_config_default(config: *mut CoreConfig) {
     if config.is_null() {
         return;
     }
+    // SAFETY: config validated non-null above; caller guarantees valid writable pointer.
     unsafe {
         *config = CoreConfig::default();
     }
 }
 
-/// Create runtime with configuration
+/// Create runtime with configuration.
+/// # Safety
+/// `config` and `out_runtime` must be valid non-null pointers.
 #[no_mangle]
 pub unsafe extern "C" fn core_runtime_create(
     config: *const CoreConfig,
@@ -74,7 +77,9 @@ pub unsafe extern "C" fn core_runtime_create(
     CoreErrorCode::Ok
 }
 
-/// Destroy runtime (blocks until graceful shutdown)
+/// Destroy runtime (blocks until graceful shutdown).
+/// # Safety
+/// `runtime` must be null or from `core_runtime_create`. Must not be called concurrently.
 #[no_mangle]
 pub unsafe extern "C" fn core_runtime_destroy(runtime: *mut CoreRuntime) {
     if runtime.is_null() {
@@ -96,6 +101,7 @@ fn config_from_c(c: &CoreConfig) -> Result<RuntimeConfig, String> {
     let auth_token = if c.auth_token.is_null() {
         return Err("auth_token is required".into());
     } else {
+        // SAFETY: auth_token validated non-null in the branch above.
         unsafe { CStr::from_ptr(c.auth_token) }
             .to_str()
             .map_err(|_| "invalid UTF-8 in auth_token")?
@@ -105,6 +111,7 @@ fn config_from_c(c: &CoreConfig) -> Result<RuntimeConfig, String> {
     let base_path = if c.base_path.is_null() {
         PathBuf::from(".")
     } else {
+        // SAFETY: base_path validated non-null in the branch above.
         let path_str = unsafe { CStr::from_ptr(c.base_path) }
             .to_str()
             .map_err(|_| "invalid UTF-8 in base_path")?;

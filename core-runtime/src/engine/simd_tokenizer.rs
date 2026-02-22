@@ -50,6 +50,9 @@ impl SimdTokenizer {
     }
 
     /// Find whitespace positions using AVX2 SIMD (x86_64 only).
+    ///
+    /// # Safety
+    /// Caller must verify AVX2 support via `is_x86_feature_detected!("avx2")`.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     unsafe fn find_whitespace_avx2(text: &[u8]) -> Vec<usize> {

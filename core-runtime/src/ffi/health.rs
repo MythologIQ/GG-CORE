@@ -10,7 +10,7 @@ use super::runtime::CoreRuntime;
 use super::types::{CoreHealthReport, CoreHealthState};
 use crate::health::HealthState;
 
-/// Health check (no authentication required)
+/// Health check (no authentication required). # Safety: pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_health_check(
     runtime: *mut CoreRuntime,
@@ -46,7 +46,7 @@ pub unsafe extern "C" fn core_health_check(
     CoreErrorCode::Ok
 }
 
-/// Liveness check (simple boolean)
+/// Liveness check. # Safety: `runtime` must be null or valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_is_alive(runtime: *mut CoreRuntime) -> bool {
     if runtime.is_null() {
@@ -57,7 +57,7 @@ pub unsafe extern "C" fn core_is_alive(runtime: *mut CoreRuntime) -> bool {
     rt.inner.health.is_alive()
 }
 
-/// Readiness check (simple boolean)
+/// Readiness check. # Safety: `runtime` must be null or valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_is_ready(runtime: *mut CoreRuntime) -> bool {
     if runtime.is_null() {
@@ -72,7 +72,7 @@ pub unsafe extern "C" fn core_is_ready(runtime: *mut CoreRuntime) -> bool {
     rt.inner.health.is_ready(shutdown_state, models, queue)
 }
 
-/// Get metrics as JSON string (caller must free with core_free_string)
+/// Get metrics JSON (free with `core_free_string`). # Safety: pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_get_metrics_json(
     runtime: *mut CoreRuntime,

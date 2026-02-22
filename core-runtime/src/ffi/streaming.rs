@@ -47,6 +47,8 @@ impl CallbackInvoker {
             .map(|s| s.as_ptr())
             .unwrap_or(std::ptr::null());
 
+        // SAFETY: callback and user_data are provided by the FFI caller who guarantees
+        // the function pointer is valid and user_data lifetime spans this call.
         let cont = unsafe {
             (self.callback)(self.user_data, text_cstr.as_ptr(), is_final, error_ptr)
         };
@@ -58,7 +60,9 @@ impl CallbackInvoker {
     }
 }
 
-/// Submit streaming inference request (blocks until complete/cancelled)
+/// Submit streaming inference (blocks until done/cancelled).
+/// # Safety
+/// All pointers valid. `callback` must be safe to invoke from any thread.
 #[no_mangle]
 pub unsafe extern "C" fn core_infer_streaming(
     runtime: *mut CoreRuntime,
@@ -147,7 +151,7 @@ pub unsafe extern "C" fn core_infer_streaming(
     }
 }
 
-/// Free string allocated by core functions
+/// Free string allocated by core functions. # Safety: `s` must be null or from core APIs.
 #[no_mangle]
 pub unsafe extern "C" fn core_free_string(s: *mut c_char) {
     if !s.is_null() {

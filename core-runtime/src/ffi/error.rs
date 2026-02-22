@@ -29,6 +29,7 @@ pub enum CoreErrorCode {
     ShuttingDown = -13,
     Timeout = -14,
     Cancelled = -15,
+    BufferTooSmall = -16,
     Internal = -99,
 }
 

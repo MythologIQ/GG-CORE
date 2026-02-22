@@ -12,7 +12,9 @@ use super::types::{CoreInferenceParams, CoreInferenceResult};
 use crate::engine::InferenceParams;
 use crate::scheduler::Priority;
 
-/// Submit inference request (blocking, text-based)
+/// Submit inference request (blocking, text-based).
+/// # Safety
+/// All non-null pointers must be valid. `params` may be null for defaults.
 #[no_mangle]
 pub unsafe extern "C" fn core_infer(
     runtime: *mut CoreRuntime,
@@ -89,7 +91,9 @@ pub unsafe extern "C" fn core_infer(
     }
 }
 
-/// Submit inference request with timeout (blocking)
+/// Submit inference request with timeout (blocking).
+/// # Safety
+/// Same as `core_infer`.
 #[no_mangle]
 pub unsafe extern "C" fn core_infer_with_timeout(
     runtime: *mut CoreRuntime,
@@ -110,7 +114,7 @@ pub unsafe extern "C" fn core_infer_with_timeout(
     core_infer(runtime, session, model_id, prompt, &timed_params, out_result)
 }
 
-/// Free inference result text (caller must call after consuming)
+/// Free inference result text. # Safety: `result` must be null or from `core_infer`.
 #[no_mangle]
 pub unsafe extern "C" fn core_free_result(result: *mut CoreInferenceResult) {
     if !result.is_null() {
@@ -143,6 +147,93 @@ fn write_inference_result(
     out.output_text = cstr.into_raw();
     out.tokens_generated = result.tokens_generated as u32;
     out.finished = result.finished;
+}
+
+/// Inference with caller-provided buffer. # Safety: all pointers valid, `out_buf` writable for `buf_len`.
+#[no_mangle]
+pub unsafe extern "C" fn core_infer_bounded(
+    runtime: *mut CoreRuntime,
+    session: *mut CoreSession,
+    model_id: *const c_char,
+    prompt: *const c_char,
+    params: *const CoreInferenceParams,
+    out_buf: *mut u8,
+    buf_len: usize,
+    out_len: *mut usize,
+) -> CoreErrorCode {
+    if runtime.is_null() || session.is_null() {
+        set_last_error("null runtime or session pointer");
+        return CoreErrorCode::NullPointer;
+    }
+    if model_id.is_null() || prompt.is_null() || out_buf.is_null() || out_len.is_null() {
+        set_last_error("null argument pointer");
+        return CoreErrorCode::NullPointer;
+    }
+
+    // SAFETY: pointers validated non-null above; caller guarantees validity.
+    let rt = &*runtime;
+    let sess = &*session;
+
+    if let Err(e) = rt.tokio.block_on(async {
+        rt.inner.ipc_handler.auth.validate(&sess.token).await
+    }) {
+        return e.into();
+    }
+
+    // SAFETY: model_id validated non-null; caller guarantees valid C string.
+    let model_str = match CStr::from_ptr(model_id).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("invalid UTF-8 in model_id");
+            return CoreErrorCode::InvalidParams;
+        }
+    };
+
+    // SAFETY: prompt validated non-null; caller guarantees valid C string.
+    let prompt_str = match CStr::from_ptr(prompt).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("invalid UTF-8 in prompt");
+            return CoreErrorCode::InvalidParams;
+        }
+    };
+
+    let default_params = CoreInferenceParams::default();
+    let c_params = if params.is_null() { &default_params } else { &*params };
+    let rust_params = params_from_c(c_params);
+
+    let result = rt.tokio.block_on(async {
+        let (_id, rx) = rt.inner.request_queue
+            .enqueue_with_response(
+                model_str.to_string(),
+                prompt_str.to_string(),
+                rust_params,
+                Priority::Normal,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        rx.await
+            .map_err(|_| "worker dropped channel".to_string())?
+            .map_err(|e| e.to_string())
+    });
+
+    match result {
+        Ok(r) => {
+            let bytes = r.output.as_bytes();
+            if bytes.len() > buf_len {
+                set_last_error("output exceeds buffer length");
+                return CoreErrorCode::BufferTooSmall;
+            }
+            // SAFETY: out_buf non-null, buf_len writable, bytes.len() <= buf_len.
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+            *out_len = bytes.len();
+            CoreErrorCode::Ok
+        }
+        Err(e) => {
+            set_last_error(&e);
+            CoreErrorCode::InferenceFailed
+        }
+    }
 }
 
 impl Clone for CoreInferenceParams {

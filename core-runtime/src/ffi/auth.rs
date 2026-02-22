@@ -18,7 +18,9 @@ pub struct CoreSession {
     session_id_cstr: CString,
 }
 
-/// Authenticate with token, returns session handle
+/// Authenticate with token, returns session handle.
+/// # Safety
+/// All pointers must be valid. `token` must be a NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn core_authenticate(
     runtime: *mut CoreRuntime,
@@ -66,7 +68,7 @@ pub unsafe extern "C" fn core_authenticate(
     }
 }
 
-/// Validate existing session
+/// Validate existing session. # Safety: pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_session_validate(
     runtime: *mut CoreRuntime,
@@ -90,7 +92,7 @@ pub unsafe extern "C" fn core_session_validate(
     }
 }
 
-/// Release session handle
+/// Release session handle. # Safety: `session` must be null or from `core_authenticate`.
 #[no_mangle]
 pub unsafe extern "C" fn core_session_release(session: *mut CoreSession) {
     if !session.is_null() {
@@ -98,7 +100,7 @@ pub unsafe extern "C" fn core_session_release(session: *mut CoreSession) {
     }
 }
 
-/// Get session ID string (borrowed pointer, valid until session released)
+/// Get session ID string (valid until session released). # Safety: session must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_session_id(session: *const CoreSession) -> *const c_char {
     if session.is_null() {

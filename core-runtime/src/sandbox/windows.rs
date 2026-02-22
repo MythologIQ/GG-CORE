@@ -109,6 +109,8 @@ fn apply_job_object_limits(config: &SandboxConfig) -> Result<isize, String> {
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
+    // SAFETY: All Windows API calls below operate on valid handles and zeroed structs.
+    // Job object is created, configured, and assigned to the current process atomically.
     unsafe {
         // Create a job object
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
@@ -172,6 +174,7 @@ impl Drop for WindowsSandbox {
     fn drop(&mut self) {
         if let Some(handle) = self.job_handle {
             #[cfg(target_os = "windows")]
+            // SAFETY: handle was obtained from CreateJobObjectW and is valid until closed.
             unsafe {
                 windows_sys::Win32::Foundation::CloseHandle(handle);
             }

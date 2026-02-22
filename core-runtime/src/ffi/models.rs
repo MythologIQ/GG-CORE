@@ -10,7 +10,7 @@ use super::runtime::CoreRuntime;
 use super::types::CoreModelMetadata;
 use crate::engine::gguf;
 
-/// Load a model via ModelLifecycle (atomic registry + engine)
+/// Load a model via ModelLifecycle. # Safety: all pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_model_load(
     runtime: *mut CoreRuntime,
@@ -73,7 +73,7 @@ pub unsafe extern "C" fn core_model_load(
     }
 }
 
-/// Unload a model via ModelLifecycle (atomic)
+/// Unload a model via ModelLifecycle. # Safety: `runtime` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_model_unload(
     runtime: *mut CoreRuntime,
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn core_model_unload(
     }
 }
 
-/// Get model info
+/// Get model info. # Safety: all pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_model_info(
     runtime: *mut CoreRuntime,
@@ -146,7 +146,7 @@ pub unsafe extern "C" fn core_model_info(
     }
 }
 
-/// Free model metadata
+/// Free model metadata. # Safety: `metadata` must be null or from `core_model_info`.
 #[no_mangle]
 pub unsafe extern "C" fn core_free_model_metadata(
     metadata: *mut CoreModelMetadata,
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn core_free_model_metadata(
     }
 }
 
-/// List all loaded models (fills out_handles buffer)
+/// List loaded models. # Safety: `out_handles` must have room for `max_count` u64 values.
 #[no_mangle]
 pub unsafe extern "C" fn core_model_list(
     runtime: *mut CoreRuntime,
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn core_model_list(
     CoreErrorCode::Ok
 }
 
-/// Get count of loaded models
+/// Get count of loaded models. # Safety: all pointers must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn core_model_count(
     runtime: *mut CoreRuntime,
