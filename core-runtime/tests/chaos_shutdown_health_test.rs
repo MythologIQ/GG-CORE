@@ -171,7 +171,7 @@ async fn chaos_combined_resource_limits_and_queue() {
     let limits = ResourceLimits::new(ResourceLimitsConfig {
         max_memory_per_call: 1024, max_total_memory: 2048, max_concurrent: 2,
     });
-    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 5 });
+    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 5, ..Default::default() });
     let mut guards = vec![];
     let mut enqueued = 0;
     for i in 0..10 {
@@ -189,7 +189,7 @@ async fn chaos_combined_resource_limits_and_queue() {
 #[tokio::test]
 async fn chaos_combined_shutdown_and_queue() {
     let shutdown = Arc::new(ShutdownCoordinator::new());
-    let queue = Arc::new(RequestQueue::new(RequestQueueConfig { max_pending: 100 }));
+    let queue = Arc::new(RequestQueue::new(RequestQueueConfig { max_pending: 100, ..Default::default() }));
     for i in 0..10u32 {
         queue.enqueue("model".into(), format!("prompt {}", i), InferenceParams::default(), Priority::Normal)
             .await.unwrap();

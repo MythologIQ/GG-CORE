@@ -18,7 +18,7 @@ use crate::models::ModelRegistry;
 use crate::scheduler::Priority;
 use crate::scheduler::RequestQueue;
 use crate::shutdown::ShutdownCoordinator;
-use crate::telemetry::{self, MetricsStore};
+use crate::telemetry::MetricsStore;
 
 #[derive(Error, Debug)]
 pub enum HandlerError {
@@ -83,6 +83,8 @@ pub struct IpcHandler {
     health_handler: HealthHandler,
     metrics_store: Arc<MetricsStore>,
     model_registry: Arc<ModelRegistry>,
+    /// Used by streaming path (gguf feature).
+    #[allow(dead_code)]
     inference_engine: Arc<InferenceEngine>,
 }
 
@@ -211,7 +213,6 @@ impl IpcHandler {
     }
 
     async fn handle_inference(&self, request: InferenceRequest) -> InferenceResponse {
-        // Check shutdown state before accepting new request
         let _guard = match self.shutdown.track() {
             Some(g) => g,
             None => {
@@ -226,10 +227,10 @@ impl IpcHandler {
             return InferenceResponse::error(request.request_id, e.to_string());
         }
 
-        // Track request in queue for metrics
+        // Enqueue and await result from worker (queue is sole execution path)
         let enqueue_result = self
             .queue
-            .enqueue(
+            .enqueue_with_response(
                 request.model_id.clone(),
                 request.prompt.clone(),
                 request.parameters.clone(),
@@ -237,67 +238,68 @@ impl IpcHandler {
             )
             .await;
 
-        if let Err(e) = enqueue_result {
-            return InferenceResponse::error(request.request_id, e.to_string());
+        let (_id, rx) = match enqueue_result {
+            Ok(r) => r,
+            Err(e) => return InferenceResponse::error(request.request_id, e.to_string()),
+        };
+
+        // Await the worker's response
+        match rx.await {
+            Ok(Ok(result)) => InferenceResponse::success(
+                request.request_id,
+                result.output,
+                result.tokens_generated,
+                result.finished,
+            ),
+            Ok(Err(e)) => InferenceResponse::error(request.request_id, e),
+            Err(_) => InferenceResponse::error(
+                request.request_id,
+                "worker dropped response channel".into(),
+            ),
         }
-
-        // Run inference using model_id to look up the model
-        let start = std::time::Instant::now();
-
-        match self
-            .inference_engine
-            .run(&request.model_id, &request.prompt, &request.parameters)
-            .await
-        {
-            Ok(result) => {
-                let latency_ms = start.elapsed().as_millis() as u64;
-
-                // Record metrics via telemetry facade (Prometheus-compatible)
-                telemetry::record_request_success(
-                    &request.model_id,
-                    latency_ms,
-                    result.tokens_generated as u64,
-                );
-
-                // Also record in model registry with correct handle for per-model stats
-                if let Some(handle) = self.inference_engine.get_handle(&request.model_id).await {
-                    self.model_registry
-                        .record_request(handle, latency_ms as f64)
-                        .await;
-                }
-
-                InferenceResponse::success(
-                    request.request_id,
-                    result.output,
-                    result.tokens_generated,
-                    result.finished,
-                )
-            }
-            Err(e) => {
-                // Record failure metrics
-                telemetry::record_request_failure(&request.model_id, &e.to_string());
-                InferenceResponse::error(request.request_id, e.to_string())
-            }
-        }
-        // guard dropped here, decrementing in-flight count
     }
 
     async fn handle_warmup(&self, model_id: String, _tokens: usize) -> WarmupResponse {
         let start = std::time::Instant::now();
-        let result = self
+
+        // Real warmup: 1-token inference through the queue
+        let warmup_params = crate::engine::InferenceParams {
+            max_tokens: 1,
+            ..Default::default()
+        };
+
+        let enqueue_result = self
             .queue
-            .enqueue(
+            .enqueue_with_response(
                 model_id.clone(),
-                "warmup".to_string(), // Minimal warmup prompt
-                crate::engine::InferenceParams::default(),
+                "Hello".to_string(),
+                warmup_params,
                 Priority::Low,
             )
             .await;
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-        match result {
-            Ok(_) => WarmupResponse::success(model_id, elapsed_ms),
-            Err(e) => WarmupResponse::error(model_id, e.to_string(), elapsed_ms),
-        }
+
+        let rx = match enqueue_result {
+            Ok((_id, rx)) => rx,
+            Err(e) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                return WarmupResponse::error(model_id, e.to_string(), elapsed);
+            }
+        };
+
+        // Await actual inference result
+        let elapsed_ms = match rx.await {
+            Ok(Ok(_)) => start.elapsed().as_millis() as u64,
+            Ok(Err(e)) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                return WarmupResponse::error(model_id, e, elapsed);
+            }
+            Err(_) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                return WarmupResponse::error(model_id, "worker unavailable".into(), elapsed);
+            }
+        };
+
+        WarmupResponse::success(model_id, elapsed_ms)
     }
 
     async fn handle_models_request(&self) -> ModelsListResponse {

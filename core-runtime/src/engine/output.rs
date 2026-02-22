@@ -68,6 +68,8 @@ pub enum FinishReason {
     Timeout,
     /// Content filter triggered.
     ContentFiltered,
+    /// Request was cancelled by caller.
+    Cancelled,
 }
 
 impl InferenceOutput {

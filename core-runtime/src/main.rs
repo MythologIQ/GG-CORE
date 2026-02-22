@@ -17,7 +17,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use gg_core::cli::{get_socket_path, run_health, run_liveness, run_readiness, run_status, CliIpcClient};
+use gg_core::cli::{
+    get_socket_path, run_health, run_liveness, run_readiness, run_status, CliIpcClient,
+};
 use gg_core::engine::InferenceParams;
 use gg_core::ipc::server;
 use gg_core::security::fips_tests;
@@ -171,10 +173,10 @@ EXAMPLES:
     GG-CORE --socket /custom/path    # Use custom socket path
 
 ENVIRONMENT:
-    VERITAS_SOCKET_PATH  IPC socket path (default: /var/run/veritas/GG-CORE.sock on Unix)
+    GG_CORE_SOCKET_PATH  IPC socket path (default: /var/run/gg-core/GG-CORE.sock on Unix)
     CORE_AUTH_TOKEN      Authentication token for server mode
     RUST_LOG             Log level (debug, info, warn, error)
-    VERITAS_ENV          Environment (development, staging, production)
+    GG_CORE_ENV          Environment (development, staging, production)
 
 EXIT CODES:
     0  Success / Healthy
@@ -218,8 +220,8 @@ DESCRIPTION:
 
 EXAMPLES:
     GG-CORE serve
-    GG-CORE serve --socket /custom/veritas.sock
-    GG-CORE serve --config /etc/veritas/config.toml
+    GG-CORE serve --socket /custom/gg-core.sock
+    GG-CORE serve --config /etc/gg-core/config.toml
 "
             );
         }
@@ -513,7 +515,9 @@ async fn run_inference(args: &[String]) -> i32 {
     }
 
     if model_id.is_empty() || prompt.is_empty() {
-        eprintln!("Usage: GG-CORE infer --model <MODEL> --prompt <PROMPT> [--max-tokens N] [--stream]");
+        eprintln!(
+            "Usage: GG-CORE infer --model <MODEL> --prompt <PROMPT> [--max-tokens N] [--stream]"
+        );
         return 1;
     }
 
@@ -525,7 +529,9 @@ async fn run_inference(args: &[String]) -> i32 {
     };
 
     let result = if stream {
-        client.send_streaming_inference(&model_id, &prompt, &params).await
+        client
+            .send_streaming_inference(&model_id, &prompt, &params)
+            .await
     } else {
         client.send_inference(&model_id, &prompt, &params).await
     };
@@ -551,6 +557,16 @@ async fn run_ipc_server(runtime: Runtime) -> Result<(), Box<dyn std::error::Erro
     let shutdown = runtime.shutdown;
     let shutdown_timeout = runtime.config.shutdown_timeout;
 
+    // Spawn the inference worker (single dequeue-execute loop)
+    let worker_shutdown = tokio_util::sync::CancellationToken::new();
+    let worker_handle = gg_core::scheduler::spawn_worker_with_registry(
+        runtime.request_queue.clone(),
+        runtime.inference_engine.clone(),
+        Some(runtime.model_lifecycle.clone()),
+        Some(runtime.model_registry.clone()),
+        worker_shutdown.clone(),
+    );
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let server_handle = tokio::spawn(server::run_server(
@@ -574,6 +590,11 @@ async fn run_ipc_server(runtime: Runtime) -> Result<(), Box<dyn std::error::Erro
             eprintln!("Shutdown timeout, {} requests remaining", remaining);
         }
     }
+
+    // Shut down the worker
+    worker_shutdown.cancel();
+    runtime.request_queue.wake();
+    let _ = worker_handle.await;
 
     // Wait for server task to finish
     if let Err(e) = server_handle.await? {

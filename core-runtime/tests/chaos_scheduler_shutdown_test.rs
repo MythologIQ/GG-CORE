@@ -18,7 +18,7 @@ use gg_core::scheduler::{Priority, RequestQueue, RequestQueueConfig};
 
 #[tokio::test]
 async fn chaos_queue_flood() {
-    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 5 });
+    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 5, ..Default::default() });
     for i in 0..5 {
         let r = queue.enqueue(
             "model".into(), format!("prompt {}", i),
@@ -35,7 +35,7 @@ async fn chaos_queue_flood() {
 
 #[tokio::test]
 async fn chaos_queue_cancel_then_dequeue() {
-    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 10 });
+    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 10, ..Default::default() });
     let (id1, _) = queue.enqueue(
         "model".into(), "first prompt".into(), InferenceParams::default(), Priority::Normal,
     ).await.unwrap();
@@ -49,7 +49,7 @@ async fn chaos_queue_cancel_then_dequeue() {
 
 #[tokio::test]
 async fn chaos_queue_expired_requests_skipped() {
-    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 10 });
+    let queue = RequestQueue::new(RequestQueueConfig { max_pending: 10, ..Default::default() });
     let short = InferenceParams { timeout_ms: Some(1), ..Default::default() };
     queue.enqueue("model".into(), "expiring prompt".into(), short, Priority::Normal).await.unwrap();
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -62,7 +62,7 @@ async fn chaos_queue_expired_requests_skipped() {
 
 #[tokio::test]
 async fn chaos_concurrent_enqueue_dequeue() {
-    let queue = Arc::new(RequestQueue::new(RequestQueueConfig { max_pending: 256 }));
+    let queue = Arc::new(RequestQueue::new(RequestQueueConfig { max_pending: 256, ..Default::default() }));
     let mut handles = vec![];
     for pid in 0..4 {
         let q = Arc::clone(&queue);

@@ -10,6 +10,7 @@ mod pool;
 mod priority;
 mod queue;
 pub mod thread_pool;
+pub mod worker;
 
 pub use batch::{BatchConfig, BatchProcessor, RequestBatch};
 pub use continuous::{
@@ -18,7 +19,8 @@ pub use continuous::{
 pub use dedup::{CachedOutput, DedupResult, OutputCache, OutputCacheConfig};
 pub use pool::ThreadPoolConfig;
 pub use priority::{Priority, PriorityQueue};
-pub use queue::{QueuedRequest, RequestQueue, RequestQueueConfig};
+pub use queue::{QueuedRequest, RequestQueue, RequestQueueConfig, ResponseRx};
+pub use worker::{spawn_worker, spawn_worker_with_registry};
 pub use thread_pool::{
     TaskPriority, ThreadPool, ThreadPoolConfig as TunableThreadPoolConfig, ThreadPoolStats,
 };

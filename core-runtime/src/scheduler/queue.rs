@@ -3,25 +3,37 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use super::priority::{Priority, PriorityQueue};
+use crate::engine::inference::InferenceResult;
 use crate::engine::InferenceParams;
+
+/// Response channel type for delivering results back to callers.
+pub type ResponseTx = tokio::sync::oneshot::Sender<Result<InferenceResult, String>>;
+/// Receiver half for awaiting inference results.
+pub type ResponseRx = tokio::sync::oneshot::Receiver<Result<InferenceResult, String>>;
+
+/// Conservative bytes-per-token estimate for tier-1 context check.
+/// UTF-8 averages ~4 bytes per token for English text.
+const BYTES_PER_TOKEN_ESTIMATE: usize = 4;
 
 /// Configuration for request queue.
 #[derive(Debug, Clone)]
 pub struct RequestQueueConfig {
     pub max_pending: usize,
+    /// Maximum context length in tokens. Used for tier-1 heuristic
+    /// rejection at enqueue time (prompt_bytes / 4 > max_context).
+    pub max_context_tokens: usize,
 }
 
 impl Default for RequestQueueConfig {
     fn default() -> Self {
-        Self { max_pending: 256 }
+        Self { max_pending: 256, max_context_tokens: 4096 }
     }
 }
 
 /// A queued inference request with timeout and cancellation support.
-#[derive(Debug)]
 pub struct QueuedRequest {
     pub id: u64,
     pub model_id: String,
@@ -30,20 +42,18 @@ pub struct QueuedRequest {
     pub params: InferenceParams,
     pub enqueued_at: Instant,
     pub deadline: Option<Instant>,
-    cancelled: Arc<AtomicBool>,
+    pub cancelled: Arc<AtomicBool>,
+    /// Channel for sending the result back to the caller.
+    pub response_tx: Option<ResponseTx>,
 }
 
-impl Clone for QueuedRequest {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            model_id: self.model_id.clone(),
-            prompt: self.prompt.clone(),
-            params: self.params.clone(),
-            enqueued_at: self.enqueued_at,
-            deadline: self.deadline,
-            cancelled: Arc::clone(&self.cancelled),
-        }
+impl std::fmt::Debug for QueuedRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueuedRequest")
+            .field("id", &self.id)
+            .field("model_id", &self.model_id)
+            .field("cancelled", &self.is_cancelled())
+            .finish()
     }
 }
 
@@ -65,12 +75,13 @@ impl QueuedRequest {
             enqueued_at,
             deadline,
             cancelled: Arc::new(AtomicBool::new(false)),
+            response_tx: None,
         }
     }
 
     /// Check if request has been cancelled.
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.cancelled.load(Ordering::Acquire)
     }
 
     /// Check if request has exceeded its deadline.
@@ -80,7 +91,12 @@ impl QueuedRequest {
 
     /// Mark the request as cancelled.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Get a closure that checks cancellation (for passing to backends).
+    pub fn cancel_check(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancelled)
     }
 }
 
@@ -89,6 +105,8 @@ pub struct RequestQueue {
     queue: Arc<Mutex<PriorityQueue<QueuedRequest>>>,
     next_id: AtomicU64,
     config: RequestQueueConfig,
+    /// Notifies the worker when new items are enqueued.
+    notify: Arc<Notify>,
 }
 
 impl RequestQueue {
@@ -97,6 +115,7 @@ impl RequestQueue {
             queue: Arc::new(Mutex::new(PriorityQueue::new())),
             next_id: AtomicU64::new(1),
             config,
+            notify: Arc::new(Notify::new()),
         }
     }
 
@@ -108,6 +127,43 @@ impl RequestQueue {
         params: InferenceParams,
         priority: Priority,
     ) -> Result<(u64, usize), QueueError> {
+        self.enqueue_inner(model_id, prompt, params, priority, None).await
+    }
+
+    /// Enqueue with a response channel. Returns (id, position, receiver).
+    pub async fn enqueue_with_response(
+        &self,
+        model_id: String,
+        prompt: String,
+        params: InferenceParams,
+        priority: Priority,
+    ) -> Result<(u64, ResponseRx), QueueError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (id, _pos) = self
+            .enqueue_inner(model_id, prompt, params, priority, Some(tx))
+            .await?;
+        Ok((id, rx))
+    }
+
+    async fn enqueue_inner(
+        &self,
+        model_id: String,
+        prompt: String,
+        params: InferenceParams,
+        priority: Priority,
+        response_tx: Option<ResponseTx>,
+    ) -> Result<(u64, usize), QueueError> {
+        // Tier-1 context check: conservative byte heuristic (~4 bytes/token).
+        // Rejects obviously oversized prompts before they enter the queue.
+        // Tier-2 precise check happens post-dequeue in InferenceEngine.
+        let estimated_tokens = prompt.len() / BYTES_PER_TOKEN_ESTIMATE;
+        if estimated_tokens > self.config.max_context_tokens {
+            return Err(QueueError::ContextTooLarge {
+                estimated_tokens,
+                max: self.config.max_context_tokens,
+            });
+        }
+
         let mut queue = self.queue.lock().await;
 
         if queue.len() >= self.config.max_pending {
@@ -125,10 +181,13 @@ impl RequestQueue {
             enqueued_at,
             deadline,
             cancelled: Arc::new(AtomicBool::new(false)),
+            response_tx,
         };
         let position = queue.len();
         queue.push(request, priority);
+        drop(queue);
 
+        self.notify.notify_one();
         Ok((id, position))
     }
 
@@ -150,10 +209,25 @@ impl RequestQueue {
         loop {
             let request = queue.pop()?;
             if request.is_cancelled() || request.is_expired() {
-                continue; // Skip cancelled/expired requests
+                continue;
             }
             return Some(request);
         }
+    }
+
+    /// Wait for a notification then dequeue. Returns None on shutdown.
+    pub async fn wait_and_dequeue(&self) -> Option<QueuedRequest> {
+        loop {
+            if let Some(req) = self.dequeue().await {
+                return Some(req);
+            }
+            self.notify.notified().await;
+        }
+    }
+
+    /// Wake the worker (used during shutdown).
+    pub fn wake(&self) {
+        self.notify.notify_one();
     }
 
     /// Current queue length.
@@ -170,12 +244,19 @@ impl RequestQueue {
 #[derive(Debug)]
 pub enum QueueError {
     QueueFull,
+    ContextTooLarge { estimated_tokens: usize, max: usize },
 }
 
 impl std::fmt::Display for QueueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::QueueFull => write!(f, "request queue is full"),
+            Self::ContextTooLarge { estimated_tokens, max } => {
+                write!(
+                    f,
+                    "prompt too large: ~{estimated_tokens} tokens (max {max})",
+                )
+            }
         }
     }
 }

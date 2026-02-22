@@ -54,6 +54,19 @@ impl GgufGenerator {
         prompt: &str,
         config: &InferenceConfig,
     ) -> Result<GenerationResult, InferenceError> {
+        self.generate_text_cancellable(prompt, config, None)
+    }
+
+    /// Generate text with optional cooperative cancellation.
+    ///
+    /// When `is_cancelled` is provided, the backend checks it once
+    /// per token and returns `FinishReason::Cancelled` if set.
+    fn generate_text_cancellable(
+        &self,
+        prompt: &str,
+        config: &InferenceConfig,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<GenerationResult, InferenceError> {
         if prompt.is_empty() {
             return Err(InferenceError::InputValidation(
                 "prompt cannot be empty".into(),
@@ -62,12 +75,14 @@ impl GgufGenerator {
         #[cfg(feature = "gguf")]
         {
             if let Some(inner) = &self.inner {
-                return inner.generate(prompt, config);
+                return inner.generate_cancellable(prompt, config, is_cancelled);
             }
         }
         #[cfg(not(feature = "gguf"))]
-        let _ = config; // silence unused warning when gguf disabled
-        // No model loaded - fail rather than return mock data
+        {
+            let _ = config;
+            let _ = is_cancelled;
+        }
         Err(InferenceError::ModelError(format!(
             "model '{}' not loaded - cannot generate",
             self.model_id
@@ -75,15 +90,19 @@ impl GgufGenerator {
     }
 
     /// Stream tokens for a prompt, sending each to the channel.
+    ///
+    /// When `is_cancelled` is provided, the backend checks it once
+    /// per token and stops streaming if set.
     #[cfg(feature = "gguf")]
     pub fn generate_stream(
         &self,
         prompt: &str,
         config: &InferenceConfig,
         sender: crate::engine::TokenStreamSender,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<(), InferenceError> {
         if let Some(inner) = &self.inner {
-            return inner.generate_stream(prompt, config, sender);
+            return inner.generate_stream(prompt, config, sender, is_cancelled);
         }
         Err(InferenceError::ModelError("no model loaded".into()))
     }

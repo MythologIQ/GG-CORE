@@ -83,7 +83,7 @@ fn error_propagation_model_not_found() {
 
 #[test]
 fn concurrent_request_queue_capacity() {
-    let config = RequestQueueConfig { max_pending: 100 };
+    let config = RequestQueueConfig { max_pending: 100, ..Default::default() };
 
     // Queue should accept requests up to max_pending
     assert_eq!(config.max_pending, 100);

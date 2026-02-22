@@ -94,8 +94,10 @@ pub struct InferenceEngine {
     max_context_length: usize,
     /// Models indexed by model_id for lookup.
     models: Arc<RwLock<HashMap<String, Arc<dyn GgufModel>>>>,
-    /// ModelHandle to model_id mapping.
+    /// ModelHandle to model_id mapping (O(1) handle->id).
     handle_to_id: Arc<RwLock<HashMap<u64, String>>>,
+    /// model_id to ModelHandle mapping (O(1) id->handle).
+    id_to_handle: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl InferenceEngine {
@@ -104,6 +106,7 @@ impl InferenceEngine {
             max_context_length,
             models: Arc::new(RwLock::new(HashMap::new())),
             handle_to_id: Arc::new(RwLock::new(HashMap::new())),
+            id_to_handle: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -115,17 +118,23 @@ impl InferenceEngine {
         model: Arc<dyn GgufModel>,
     ) {
         self.models.write().await.insert(model_id.clone(), model);
-        self.handle_to_id.write().await.insert(handle.id(), model_id);
+        self.handle_to_id.write().await.insert(handle.id(), model_id.clone());
+        self.id_to_handle.write().await.insert(model_id, handle.id());
     }
 
     /// Unregister a model.
     pub async fn unregister_model(&self, model_id: &str) {
         self.models.write().await.remove(model_id);
-        let mut handles = self.handle_to_id.write().await;
-        handles.retain(|_, v| v != model_id);
+        if let Some(handle_id) = self.id_to_handle.write().await.remove(model_id) {
+            self.handle_to_id.write().await.remove(&handle_id);
+        }
     }
 
     /// Run inference on text prompt using the specified model.
+    ///
+    /// NOTE: The read lock on `self.models` is held for the entire
+    /// inference call. This is a P2 optimization target — clone the
+    /// Arc<dyn GgufModel> and drop the lock before calling infer().
     pub async fn run(
         &self,
         model_id: &str,
@@ -133,31 +142,75 @@ impl InferenceEngine {
         params: &InferenceParams,
     ) -> Result<InferenceResult, InferenceError> {
         params.validate()?;
+        let model = self.get_model(model_id).await?;
+        self.check_context(prompt)?;
+        Self::infer_with_model(&model, prompt, params).await
+    }
 
-        // Look up model by ID
+    /// Run inference with cooperative cancellation.
+    ///
+    /// Checks `is_cancelled` before inference. Per-token cancellation
+    /// is threaded through the GGUF backend in a future PR (P0.3).
+    pub async fn run_cancellable(
+        &self,
+        model_id: &str,
+        prompt: &str,
+        params: &InferenceParams,
+        is_cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<InferenceResult, InferenceError> {
+        use std::sync::atomic::Ordering;
+
+        params.validate()?;
+
+        if is_cancelled.load(Ordering::Acquire) {
+            return Err(InferenceError::ExecutionFailed("cancelled".into()));
+        }
+
+        let model = self.get_model(model_id).await?;
+        self.check_context(prompt)?;
+
+        let result = Self::infer_with_model(&model, prompt, params).await?;
+
+        if is_cancelled.load(Ordering::Acquire) {
+            return Err(InferenceError::ExecutionFailed("cancelled".into()));
+        }
+
+        Ok(result)
+    }
+
+    /// Look up a model by ID, cloning the Arc (drops the read lock).
+    async fn get_model(
+        &self,
+        model_id: &str,
+    ) -> Result<Arc<dyn GgufModel>, InferenceError> {
         let models = self.models.read().await;
-        let model = models.get(model_id).ok_or_else(|| {
+        models.get(model_id).cloned().ok_or_else(|| {
             InferenceError::ModelNotLoaded(model_id.to_string())
-        })?;
+        })
+    }
 
-        // Check context length (approximate by bytes)
+    fn check_context(&self, prompt: &str) -> Result<(), InferenceError> {
         if prompt.len() > self.max_context_length {
             return Err(InferenceError::ContextExceeded {
                 max: self.max_context_length,
                 got: prompt.len(),
             });
         }
+        Ok(())
+    }
 
-        // Convert params to internal config
+    async fn infer_with_model(
+        model: &Arc<dyn GgufModel>,
+        prompt: &str,
+        params: &InferenceParams,
+    ) -> Result<InferenceResult, InferenceError> {
         let config = params.to_config();
         let input = InferenceInput::Text(prompt.to_string());
 
-        // Delegate to actual model
         let output = model.infer(&input, &config).await.map_err(|e| {
             InferenceError::ExecutionFailed(e.to_string())
         })?;
 
-        // Extract generation result
         match output {
             InferenceOutput::Generation(gen) => Ok(InferenceResult {
                 output: gen.text,
@@ -193,15 +246,11 @@ impl InferenceEngine {
         self.models.read().await.contains_key(model_id)
     }
 
-    /// Get the ModelHandle for a model_id (for metrics attribution).
+    /// Get the ModelHandle for a model_id (O(1) lookup).
     pub async fn get_handle(&self, model_id: &str) -> Option<ModelHandle> {
-        let handles = self.handle_to_id.read().await;
-        for (&handle_id, id) in handles.iter() {
-            if id == model_id {
-                return Some(ModelHandle::new(handle_id));
-            }
-        }
-        None
+        self.id_to_handle.read().await
+            .get(model_id)
+            .map(|&id| ModelHandle::new(id))
     }
 
     /// Run streaming inference, sending tokens to the provided sender.
@@ -230,7 +279,7 @@ impl InferenceEngine {
             InferenceError::ExecutionFailed("model does not support streaming".into())
         })?;
 
-        generator.generate_stream(prompt, config, sender)
+        generator.generate_stream(prompt, config, sender, None)
             .map_err(|e| InferenceError::ExecutionFailed(e.to_string()))
     }
 }

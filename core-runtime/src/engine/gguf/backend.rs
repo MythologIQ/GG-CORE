@@ -56,22 +56,39 @@ impl LlamaBackendInner {
         prompt: &str,
         config: &InferenceConfig,
     ) -> Result<GenerationResult, InferenceError> {
+        self.generate_cancellable(prompt, config, None)
+    }
+
+    /// Generate text with optional cooperative cancellation.
+    ///
+    /// When `is_cancelled` is provided, it is checked once per token.
+    /// If set, generation stops early with `FinishReason::Cancelled`.
+    pub fn generate_cancellable(
+        &self,
+        prompt: &str,
+        config: &InferenceConfig,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<GenerationResult, InferenceError> {
         let tokens = self.tokenize(prompt)?;
         let max_tok = config.max_tokens.unwrap_or(256);
         let mut ctx = self.create_context()?;
         let (out_tokens, reason) =
-            self.sample_loop(&mut ctx, &tokens, max_tok, config)?;
+            self.sample_loop(&mut ctx, &tokens, max_tok, config, is_cancelled)?;
         let text = self.detokenize(&out_tokens)?;
         let count = u32::try_from(out_tokens.len()).unwrap_or(u32::MAX);
         Ok(GenerationResult { text, tokens_generated: count, finish_reason: reason })
     }
 
     /// Stream tokens one at a time through a channel.
+    ///
+    /// When `is_cancelled` is provided, it is checked once per token.
+    /// If set, streaming stops early.
     pub fn generate_stream(
         &self,
         prompt: &str,
         config: &InferenceConfig,
         sender: crate::engine::TokenStreamSender,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<(), InferenceError> {
         let tokens = self.tokenize(prompt)?;
         let max_tok = config.max_tokens.unwrap_or(256);
@@ -84,6 +101,9 @@ impl LlamaBackendInner {
         let mut pos = tokens.len() as i32;
         let rt = tokio::runtime::Handle::current();
         for i in 0..max_tok {
+            if is_cancelled.as_ref().is_some_and(|f| f()) {
+                break;
+            }
             // Use -1 to sample from the last token that had logits computed
             let tok = sampler.sample(&ctx, -1);
             sampler.accept(tok);
@@ -207,6 +227,7 @@ impl LlamaBackendInner {
         tokens: &[LlamaToken],
         max_tok: u32,
         config: &InferenceConfig,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<(Vec<LlamaToken>, FinishReason), InferenceError> {
         let mut batch = LlamaBatch::new(tokens.len(), 1);
         add_seq(&mut batch, tokens)?;
@@ -216,6 +237,9 @@ impl LlamaBackendInner {
         let mut out = Vec::new();
         let mut pos = tokens.len() as i32;
         for _ in 0..max_tok {
+            if is_cancelled.as_ref().is_some_and(|f| f()) {
+                return Ok((out, FinishReason::Cancelled));
+            }
             // Use -1 to sample from the last token that had logits computed
             let tok = sampler.sample(ctx, -1);
             sampler.accept(tok);
