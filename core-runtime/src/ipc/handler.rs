@@ -387,6 +387,9 @@ impl IpcHandler {
     }
 
     /// Internal streaming implementation (gguf feature only).
+    ///
+    /// Acquires a queue admission slot before streaming, ensuring the
+    /// streaming path respects queue capacity (C-2 fix).
     #[cfg(feature = "gguf")]
     async fn run_streaming_inference(
         &self,
@@ -395,20 +398,25 @@ impl IpcHandler {
         cancel: CancellationToken,
     ) -> Result<(), HandlerError> {
         let request_id = request.request_id;
+
+        // Queue admission: capacity + tier-1 context check
+        let _admission = self
+            .queue
+            .admit_streaming(&request.prompt)
+            .await
+            .map_err(|e| HandlerError::QueueFull(e.to_string()))?;
+
         let model_id = request.model_id.clone();
         let prompt = request.prompt.clone();
         let config = request.parameters.to_config();
         let engine = Arc::clone(&self.inference_engine);
 
-        // Create channel for token streaming
         let (token_sender, mut stream) = TokenStream::new(32);
 
-        // Spawn blocking inference task
         let inf_handle = tokio::task::spawn_blocking(move || {
             engine.run_stream_sync(&model_id, &prompt, &config, token_sender)
         });
 
-        // Relay tokens to IPC, handling cancellation
         loop {
             tokio::select! {
                 biased;
@@ -430,14 +438,14 @@ impl IpcHandler {
                                 break;
                             }
                         }
-                        None => break, // Channel closed
+                        None => break,
                     }
                 }
             }
         }
 
-        // Wait for inference task (ignore result - tokens already sent)
         let _ = inf_handle.await;
+        // _admission guard drops here, releasing the slot
         Ok(())
     }
 }

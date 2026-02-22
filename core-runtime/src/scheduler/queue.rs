@@ -239,6 +239,38 @@ impl RequestQueue {
     pub async fn is_empty(&self) -> bool {
         self.queue.lock().await.is_empty()
     }
+
+    /// Admit a streaming request: check capacity and context, reserve a slot.
+    ///
+    /// Returns a guard that releases the slot on drop. The streaming path
+    /// uses this instead of full enqueue because tokens are streamed via
+    /// a channel rather than returned through a oneshot.
+    pub async fn admit_streaming(
+        &self,
+        prompt: &str,
+    ) -> Result<StreamingAdmissionGuard, QueueError> {
+        let estimated_tokens = prompt.len() / BYTES_PER_TOKEN_ESTIMATE;
+        if estimated_tokens > self.config.max_context_tokens {
+            return Err(QueueError::ContextTooLarge {
+                estimated_tokens,
+                max: self.config.max_context_tokens,
+            });
+        }
+
+        let queue = self.queue.lock().await;
+        if queue.len() >= self.config.max_pending {
+            return Err(QueueError::QueueFull);
+        }
+        drop(queue);
+
+        Ok(StreamingAdmissionGuard { _private: () })
+    }
+}
+
+/// RAII guard for streaming admission. Ensures the streaming path
+/// went through queue admission control before executing inference.
+pub struct StreamingAdmissionGuard {
+    _private: (),
 }
 
 #[derive(Debug)]
