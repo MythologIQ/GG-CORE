@@ -9,12 +9,18 @@
 //! - Enterprise audit logging
 
 pub mod audit;
+pub mod audit_types;
+pub mod encryption_core;
+pub mod encryption_io;
+pub mod encryption_key;
 pub mod encryption;
 pub mod fips_tests;
 pub mod key_rotation;
 pub mod output_sanitizer;
 pub mod pii_detector;
+pub mod pii_patterns;
 pub mod prompt_injection;
+pub mod sanitizer_rules;
 
 pub use audit::{AuditCategory, AuditEvent, AuditLogger, AuditSeverity};
 pub use encryption::ModelEncryption;

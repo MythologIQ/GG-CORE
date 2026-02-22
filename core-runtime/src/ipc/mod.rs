@@ -4,10 +4,13 @@
 //! This is the ONLY external interface - no HTTP/REST/WebSocket allowed.
 
 mod auth;
+mod auth_session;
 mod connections;
 pub mod encoding;
 mod handler;
 mod health_handler;
+pub mod protocol_types;
+pub mod protocol_codec;
 pub mod protocol;
 pub mod server;
 mod stream_bridge;
